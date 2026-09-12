@@ -1,0 +1,40 @@
+name: Cloudflare migration readiness
+on:
+  push:
+    branches: [migration/cloudflare-20260912]
+    paths: [.github/workflows/cloudflare-readiness.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  credentials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check credential availability without displaying secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID || secrets.CF_ACCOUNT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT || secrets.FIREBASE_SERVICE_ACCOUNT_SHARETRAVELINFOLIKEDQ || secrets.GOOGLE_CREDENTIALS }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const required = ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_ACCOUNT_ID', 'FIREBASE_SERVICE_ACCOUNT'];
+          const missing = required.filter(name => !process.env[name]);
+          const lines = ['## Migration readiness', '', ...required.map(name => `- ${name}: ${process.env[name] ? 'configured (not yet authenticated)' : 'missing'}`), '', 'This check does not export data, deploy, modify rules, or print secret values.'];
+          if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+            try {
+              const account = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+              if (account.project_id !== 'sharetravelinfolikedq' || !account.private_key || !account.client_email) {
+                lines.push('Firebase credential does not match the expected source project.');
+                missing.push('valid Firebase credential');
+              }
+            } catch {
+              lines.push('Firebase credential is not valid service-account JSON.');
+              missing.push('valid Firebase credential');
+            }
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n') + '\n');
+          console.log(lines.join('\n'));
+          if (missing.length) process.exitCode = 1;
+          NODE
