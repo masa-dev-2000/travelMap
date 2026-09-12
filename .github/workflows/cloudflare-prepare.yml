@@ -1,0 +1,28 @@
+name: Cloudflare migration preparation tests
+on:
+  push:
+    branches: [migration/cloudflare-20260912]
+    paths:
+      - scripts/firebase-backup.mjs
+      - scripts/build-cloudflare.mjs
+      - tests/cloudflare-migration.test.mjs
+      - wrangler.jsonc
+      - .github/workflows/cloudflare-prepare.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/cloudflare-migration.test.mjs
+      - run: node scripts/build-cloudflare.mjs
+      - name: Validate Cloudflare configuration without deploying
+        run: npx --yes wrangler@4 deploy --dry-run --outdir .cloudflare-dry-run

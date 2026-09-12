@@ -7,3 +7,13 @@ serviceAccountKey.json
 *~
 *.swp
 *.un~
+
+# Cloudflare generated output and local credentials
+.cloudflare-dist/
+.cloudflare-dry-run/
+.wrangler/
+.dev.vars*
+.env*
+!.env.example
+.local-backups/
+travelmap-backups/
