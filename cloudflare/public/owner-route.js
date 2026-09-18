@@ -1,11 +1,14 @@
-import {el, whoMarker} from './shared.js';
+import {el, whoMarker, ago, statusLine} from './shared.js';
 import {gl} from './owner-map.js';
 import {orderedRoute} from './route.js';
 const collection=features=>({type:'FeatureCollection',features});
 const point=r=>[r.longitude,r.latitude];
 const feature=(geometry,properties={})=>({type:'Feature',geometry,properties});
+const shortDay=r=>new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'});
+// マーカーの2行目: ステータス、無ければ「最後の記録のカテゴリ · 3時間前」
+const under=(user,r)=>statusLine(user?.status,user?.status_at)||[r.category_name,ago({at:r.occurred_at,date:new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})})].filter(Boolean).join(' · ');
 export function makeOwnerRoute(map,shell){
-  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null,replaying=false;
+  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null,replaying=false,ghost=null;
   const badge=el('button',{className:'route-overview',type:'button',textContent:'全ルート',hidden:true});document.querySelector('.map-stage').append(badge);
   const popup=new gl.Popup({maxWidth:'280px'});
   function sources(){
@@ -36,11 +39,12 @@ export function makeOwnerRoute(map,shell){
   map.on('style.load',()=>{styleReady=true;draw();});
   function deselect(){index=null;badge.textContent='全ルート';draw();}
   shell.drawer.addEventListener('viewchange',event=>{if(event.detail!=='route')deselect();});
-  function clear(){rows=[];callbacks.clear();index=null;badge.hidden=true;popup.remove();endpoints.forEach(m=>m.remove());endpoints=[];draw();}
+  function clear(){rows=[];ghost=null;callbacks.clear();index=null;badge.hidden=true;popup.remove();endpoints.forEach(m=>m.remove());endpoints=[];draw();}
   function fit(coords,panel=false){
     if(!coords.length)return;const bounds=new gl.LngLatBounds();coords.forEach(c=>bounds.extend(c));
-    const phone=map.getContainer().clientWidth<=600;
-    const padding=panel?(phone?{top:70,left:24,right:24,bottom:Math.min(map.getContainer().clientHeight*.76,650)}:{top:80,left:Math.min(510,map.getContainer().clientWidth*.55),right:35,bottom:40}):{top:80,bottom:105,left:phone?30:100,right:40};
+    const phone=innerWidth<=700,height=map.getContainer().clientHeight;
+    // 区間パネルが開いている間: スマホは下からのシート(画面の8割)を避ける。PC は右ペインの分だけ地図が狭くなっているので余白は通常どおり
+    const padding=panel&&phone?{top:60,left:24,right:24,bottom:Math.max(0,Math.min(height*.8,height-150))}:{top:80,bottom:panel?40:105,left:phone?30:100,right:40};
     map.fitBounds(bounds,{padding,maxZoom:13,duration:0,retainPadding:false});
   }
   function select(next,move=true){
@@ -57,7 +61,9 @@ export function makeOwnerRoute(map,shell){
     if(move)fit([point(rows[index]),point(rows[index+1])],true);
   }
   badge.onclick=()=>select(index??0);
-  map.on('resize',()=>{if(index!==null)fit([point(rows[index]),point(rows[index+1])],true);else fit(rows.map(point));});
+  let windowSize=innerWidth+'x'+innerHeight;
+  map.on('resize',()=>{const next=innerWidth+'x'+innerHeight;if(next===windowSize)return;windowSize=next;// 右ペインの開閉による地図の伸縮では視点を変えない(ウィンドウの大きさが変わった時だけ合わせ直す)
+    if(index!==null)fit([point(rows[index]),point(rows[index+1])],true);else fit(rows.map(point));});
   map.on('click',event=>{
     if(!map.getLayer('travel-hit'))return;
     const hits=map.queryRenderedFeatures(event.point,{layers:['travel-dots','travel-hit']});
@@ -71,14 +77,22 @@ export function makeOwnerRoute(map,shell){
     if(rows.length)for(const [r,label,idx] of [[rows[0],'始点',0],[rows.at(-1),'最新',rows.length-2]]){
       if(rows.length===1&&label==='始点')continue;
       const latest=label==='最新',button=el('button',{type:'button',className:latest?'who-button':'vector-endpoint',textContent:latest?'':label});
-      if(latest)button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}),color:'#356f68'}));
+      if(latest)button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+shortDay(r),status:under(user,r),color:'#356f68'}));
       button.setAttribute('aria-label',label+' '+new Date(r.occurred_at).toLocaleString('ja-JP'));button.onclick=()=>select(idx);
       // 最新マーカーは素の外側要素(.who-pin)を MapLibre に渡す。ボタンの all:unset が .maplibregl-marker の position:absolute を消して位置がずれるため
       const pinEl=latest?el('div',{className:'who-pin'}):button;if(latest)pinEl.append(button);
       endpoints.push(new gl.Marker({element:pinEl,anchor:latest?'center':'right'}).setLngLat(point(r)).addTo(map));
     }
+    // 期間内に記録が無いとき: 線は出さず、最後の地点に薄いマーカーだけ置く
+    if(!rows.length&&ghost&&!replaying){
+      const r=ghost,button=el('button',{type:'button',className:'who-button'}),pinEl=el('div',{className:'who-pin stale'});
+      button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最後 '+shortDay(r),status:under(user,r),color:'#356f68'}));
+      button.setAttribute('aria-label','最後の記録 '+new Date(r.occurred_at).toLocaleString('ja-JP'));
+      button.onclick=event=>{event.stopPropagation();const node=el('div');node.append(el('strong',{textContent:r.observed_place_name||r.category_name||'最後の記録'}),el('p',{className:'hint',textContent:'この期間の記録はありません。最後の記録: '+new Date(r.occurred_at).toLocaleDateString('ja-JP')}));const open=el('button',{type:'button',textContent:'記録を開く'});open.onclick=()=>{popup.remove();callbacks.get(r.id)?.();};node.append(open);popup.setLngLat(point(r)).setDOMContent(node).addTo(map);};
+      pinEl.append(button);endpoints.push(new gl.Marker({element:pinEl,anchor:'center'}).setLngLat(point(r)).addTo(map));
+    }
   }
-  function render(records){rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;markers();draw();}
-  return {setReplay:value=>{replaying=value;if(value){index=null;badge.textContent='全ルート';popup.remove();}else markers();badge.hidden=value||rows.length<2;draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.occurred_at)})),marker:endpoints.at(-1)}),
-    setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>rows.map(point)};
+  function render(records,fallback=[]){rows=orderedRoute(records);ghost=rows.length?null:orderedRoute(fallback).at(-1)??null;index=null;badge.hidden=rows.length<2;markers();draw();}
+  return {setReplay:value=>{replaying=value;if(value){index=null;badge.textContent='全ルート';popup.remove();}else markers();badge.hidden=value||rows.length<2;draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.occurred_at)})),marker:rows.length?endpoints.at(-1):undefined}),
+    setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>rows.length?rows.map(point):ghost?[point(ghost)]:[],count:()=>rows.length};
 }

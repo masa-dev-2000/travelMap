@@ -3,7 +3,7 @@ import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
 export async function startMe({shell,map,route,everyone,fitRecords,notify,me}){
 const $=selector=>document.querySelector(selector);
 let categories=[], trips=[], activityOffset=null, transactionOffset=null;
-let activityGeneration=0,allRecords=[],publicFilter=null;
+let activityGeneration=0,allRecords=[],publicFilter=everyone.filter(),recordsLoaded=false;
 function formValues(form){return Object.fromEntries(new FormData(form));}
 function localNow(now=new Date()){return new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);}
 function fillSelect(select,items,empty){select.replaceChildren();if(empty) select.append(new Option(empty,''));for(const item of items)select.append(new Option(item.name,item.id));}
@@ -13,7 +13,7 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);everyone.setSelf(data.user.handle);paintFace(data.user);pf.elements.tip_url.value=data.user.tip_url||'';}
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);$('#status-form').elements.status.value=data.user.status||'';everyone.setSelf(data.user.handle);paintFace(data.user);pf.elements.tip_url.value=data.user.tip_url||'';}
   paintTravel(data.settings?.map_visible===true,data.settings?.map_visible_until);
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');
@@ -61,7 +61,7 @@ async function activities(reset=true){
   activityOffset=data.next_offset;$('#more-activities').hidden=true;
   shell.count.textContent=`${count}件${activityOffset!==null?' 読み込み中…':` · 地図${located}件`}`;
   } while(activityOffset!==null);
-  allRecords=routeRecords;drawOwn();
+  allRecords=routeRecords;recordsLoaded=true;drawOwn();
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
@@ -148,6 +148,8 @@ function paintTravel(on,until){$('#map-visible').checked=on;$('#map-visible-labe
 async function saveTravel(body,done){try{await api('settings',body);const data=await api('bootstrap');paintTravel(data.settings.map_visible,data.settings.map_visible_until);if(body.map_visible_days)$('#map-visible-days').value=String(body.map_visible_days);await everyone.reload();notify(done(data.settings));}catch(error){notify(error.message);const data=await api('bootstrap').catch(()=>null);if(data)paintTravel(data.settings.map_visible,data.settings.map_visible_until);}}
 $('#map-visible').onchange=event=>saveTravel(event.target.checked?{map_visible:true,map_visible_days:Number($('#map-visible-days').value)}:{map_visible:false},s=>s.map_visible?'旅モードをオンにしました。みんなの地図に表示されます':'旅モードをオフにしました。みんなの地図から隠れます');
 $('#map-visible-days').onchange=event=>saveTravel({map_visible_days:Number(event.target.value)},s=>s.map_visible_until?'自動でオフにする日時を保存しました':'手動でオフにするまで旅モードを続けます');
+// いまのステータス(ひとこと)。空で保存すると消える
+$('#status-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;try{await api('settings',{status:form.elements.status.value});await bootstrap();await everyone.reload();notify(form.elements.status.value.trim()?'ステータスを更新しました':'ステータスを消しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
 $('#publish-precision').onchange=async event=>{try{await api('settings',{publish_precision:event.target.value});notify('位置の出し方を保存しました');}catch(error){notify(error.message);}};
 $('#publish-delay').onchange=async event=>{try{await api('settings',{publish_delay_hours:Number(event.target.value)});notify('見せるまでの時間を保存しました');}catch(error){notify(error.message);}};
 async function iconRequest(method,body){const response=await fetch('/api/private/icon',{method,headers:body?{'Content-Type':'image/png'}:{},body}),result=await response.json();if(!response.ok)throw new Error(result.error||'保存できませんでした');}
@@ -176,7 +178,10 @@ for(const input of document.querySelectorAll('[type=datetime-local]'))input.valu
 // タイムラインの絞り込みを自分の線にも反映する(ほかの人を選んだら自分の線は隠す)
 function drawOwn(){
   const f=publicFilter,tripName=id=>trips.find(t=>t.id===id)?.name,jst=r=>new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
-  route.render(!f||!f.active?allRecords:f.person&&f.person!==me.handle?[]:allRecords.filter(r=>(!f.trip||tripName(r.trip_id)===f.trip)&&(!f.category||r.category_name===f.category)&&(!f.from||jst(r)>=f.from)&&(!f.to||jst(r)<=f.to)));
+  const other=!!(f?.person&&f.person!==me.handle),rows=!f||!f.active?allRecords:other?[]:allRecords.filter(r=>(!f.trip||tripName(r.trip_id)===f.trip)&&(!f.category||r.category_name===f.category)&&(!f.from||jst(r)>=f.from)&&(!f.to||jst(r)<=f.to));
+  // 期間内に記録が無ければ、最後の地点だけ薄く出す(ほかの人・旅・カテゴリで絞っている間は出さない)
+  route.render(rows,other||f?.trip||f?.category?[]:allRecords);
+  if(recordsLoaded)shell.count.textContent=everyone.countText(rows.length,allRecords.length);
 }
 // 右上の自分のアイコン → 設定シート
 const face=el('button',{type:'button',className:'me-button'});face.setAttribute('aria-label','設定を開く');shell.stage.append(face);

@@ -22,12 +22,13 @@ if(me)groups.push(
 const shell=mapShell(groups);
 if(!me){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'ログイン'}));shell.fit.after(login);}
 const map=makeOwnerMap();
+shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの開閉で地図の幅が変わる。続く fit が新しい幅で計算されるよう、その場で合わせる
 const route=makeOwnerRoute(map,shell);
 let noticeTimer,mine=null;
 function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
 const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:!!me,onFilter:filter=>{replay.finish();mine?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle)});
 const JAPAN={center:[137.5,37.5],zoom:4.3};
-function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);}
+function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);if(everyone.count()&&!route.count()&&!everyone.shownCount())notify('この期間の記録はありません。期間を広げると表示されます');}
 shell.fit.onclick=()=>{shell.hide();fitRecords();};
 const replay=makeReplay(map,shell,{tracks:()=>[route.track(),...everyone.tracks()],begin:()=>{route.setReplay(true);everyone.setReplay(true);fitRecords();},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 window.__tm={everyone,route,shell,replay};// 画面確認用(コンソールから状態を読む)

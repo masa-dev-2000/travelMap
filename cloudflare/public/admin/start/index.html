@@ -9,15 +9,17 @@ header{flex:none;display:flex;align-items:center;gap:10px;font-size:14px;color:v
 .way:active{transform:scale(.98)}.way strong{font-size:clamp(28px,8vw,44px);font-weight:800;letter-spacing:.02em}.way span{font-size:15px;opacity:.9;line-height:1.5}
 #tap{flex:1.4;background:radial-gradient(circle at 30% 30%,#2f7d63,#1f5c4a)}#tap.busy{filter:saturate(.4) brightness(.8)}#tap.done{background:radial-gradient(circle at 30% 30%,#7fe0b5,#2f9d78)}
 .detail{flex:1;background:radial-gradient(circle at 30% 30%,#e0a24a,#c77f24)}
+#status-form{flex:none;display:flex;gap:8px}#status-form input{flex:1;min-width:0;height:44px;padding:0 14px;border:1px solid #ffffff44;border-radius:14px;background:#ffffff14;color:var(--ink);font:inherit;font-size:16px;user-select:text;-webkit-user-select:text}#status-form input::placeholder{color:var(--muted)}#status-form button{height:44px;padding:0 16px;border:1px solid #ffffff55;border-radius:14px;background:none;color:var(--ink);font:inherit}
 footer{flex:none;display:flex;align-items:center;gap:10px;min-height:48px;font-size:14px}
 #status{flex:1}#status b{font-size:18px;font-variant-numeric:tabular-nums}
 #undo{height:44px;padding:0 16px;border:1px solid #ffffff55;border-radius:14px;background:none;color:var(--ink);font:inherit}
 .mode{display:inline-flex;align-items:center;gap:8px;font-weight:700}.mode input{position:absolute;opacity:0}
 .switch{position:relative;width:44px;height:26px;border-radius:999px;background:#ffffff33}.switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .15s}
 .mode input:checked+.switch{background:var(--ok)}.mode input:checked+.switch::after{transform:translateX(18px)}
-</style><script type="module" src="/admin/start/start.js?v=2"></script></head>
+</style><script type="module" src="/admin/start/start.js?v=3"></script></head>
 <body><header><span id="where"><i></i><span>位置を取得中…</span></span><a href="/">地図・設定</a></header>
 <button id="tap" class="way" type="button"><strong>位置だけ</strong><span id="sub">押すと、今の場所と時刻をすぐ残します</span></button>
 <a class="way detail" href="/admin/record/"><strong>くわしく</strong><span>カテゴリ・金額・メモ・写真・評価を入力します</span></a>
+<form id="status-form"><input name="status" maxlength="40" placeholder="いまのステータス（例：温泉で休憩中）" aria-label="いまのステータス" autocomplete="off" enterkeyhint="done"><button>更新</button></form>
 <footer><label class="mode"><input id="visible" type="checkbox"><span class="switch" aria-hidden="true"></span><span id="visible-label">旅モードオフ</span></label><div id="status" role="status" aria-live="polite" style="text-align:right">今日 <b id="count">0</b> 件</div><button id="undo" type="button" hidden>取り消す</button></footer>
 </body></html>

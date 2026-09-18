@@ -59,3 +59,6 @@ CREATE TABLE IF NOT EXISTS footprints (
   UNIQUE(viewer_id,owner_id,day)
 );
 CREATE INDEX IF NOT EXISTS footprints_owner ON footprints(owner_id,created_at);
+-- Short status line shown on the shared map ("heading to Aso"). NULL = none; status_at is when it was last changed.
+ALTER TABLE users ADD COLUMN status TEXT;
+ALTER TABLE users ADD COLUMN status_at TEXT;

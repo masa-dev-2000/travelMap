@@ -72,7 +72,7 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
     // 'at' (exact time, for "3 hours ago") is only exposed for entries published without a delay whose public date was not edited.
     const entries = await query(env.DB, `SELECT p.id,p.date,CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
-      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,
+      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,u.status author_status,u.status_at author_status_at,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
@@ -83,12 +83,12 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
   }
   const profile = url.pathname.match(/^\/api\/public\/users\/([a-z0-9-]+)$/);
   if (profile) {
-    const row = await query(env.DB, `SELECT u.handle,u.display_name,u.avatar_url,u.bio,u.tip_url,
+    const row = await query(env.DB, `SELECT u.handle,u.display_name,u.avatar_url,u.bio,u.tip_url,CASE WHEN ${travelling('u.id')} THEN u.status END author_status,CASE WHEN ${travelling('u.id')} THEN u.status_at END author_status_at,
       (SELECT COUNT(*) FROM public_entries p WHERE p.user_id=u.id AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)) entries,
       ${travelling('u.id')} visible,
       (SELECT MIN(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') first_date,
       (SELECT MAX(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') last_date
-      FROM users u WHERE u.handle=?`, [new Date().toISOString(), new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
+      FROM users u WHERE u.handle=?`, [new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
     return row ? json(row) : json({error:'Not found'},404);
   }
   const icon = url.pathname.match(/^\/api\/public\/icons\/([a-z0-9-]+)$/);
@@ -270,6 +270,13 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       if (body.publish_precision !== undefined) { const value=text(body.publish_precision,'公開の粒度',10); if (!['exact','city','hidden'].includes(value)) throw new InputError('公開の粒度が不正です'); put('publish_precision',value); }
       if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
       if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));
+      if (body.status !== undefined) {
+        // Status line: one line, up to 40 characters. Empty clears it. Rendered with textContent only, so markup characters are allowed.
+        if (body.status !== null && typeof body.status !== 'string') throw new InputError('ステータスを確認してください');
+        const status=(body.status ?? '').trim();
+        if ([...status].length>40 || /[\r\n]/.test(status)) throw new InputError('ステータスは改行なしの40文字以内です');
+        writes.push(query(db,'UPDATE users SET status=?,status_at=? WHERE id=?',[status || null,status ? new Date().toISOString() : null,uid]));
+      }
       if (body.bio !== undefined) writes.push(query(db,'UPDATE users SET bio=? WHERE id=?',[text(body.bio,'ひとこと',300,false),uid]));
       if (body.icon !== undefined) {
         if (body.icon !== null && typeof body.icon !== 'string') throw new InputError('アイコンが不正です');

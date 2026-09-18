@@ -8,7 +8,7 @@ const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_n
 async function localUser(env: Env): Promise<User> {
   await env.DB.prepare('INSERT OR IGNORE INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES(?,?,?,?,?,?,?)')
     .bind(LOCAL_USER.id, null, LOCAL_USER.email, LOCAL_USER.display_name, LOCAL_USER.handle, null, new Date().toISOString()).run();
-  return await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
+  return await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
 }
 
 export async function handle(request: Request, env: Env, localOwner = false): Promise<Response> {
@@ -17,7 +17,7 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     if (url.pathname === '/api/public/session' && request.method === 'GET') {
       // Login state for the single map page. Only public profile fields; private data stays behind /api/private/*.
       const who = localOwner ? await localUser(env) : await currentUser(request,env);
-      return secure(json({user: who ? {handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version == null ? null : `/api/public/icons/${who.handle}?v=${who.icon_version}`} : null}));
+      return secure(json({user: who ? {handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version == null ? null : `/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status ?? null,author_status_at:who.status_at ?? null} : null}));
     }
     if (url.pathname.startsWith('/api/public/')) return secure(await publicApi(request,env));
     // The old owner page moved to the single map page at /.

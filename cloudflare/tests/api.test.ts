@@ -287,6 +287,26 @@ test('map icon accepts up to two emoji, rejects markup and long text, and reache
   assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon,null);
 });
 
+test('status line: saved and cleared, 40 characters and one line at most, in the feed only while travel mode is on',async()=>{
+  for(const status of ['あ'.repeat(41),'a\nb',5])assert.equal((await owner('/api/private/settings',{status})).status,400);
+  assert.equal((await owner('/api/private/settings',{status:' 阿蘇に向かってます <b> '})).status,200);
+  const me=(await(await owner('/api/private/bootstrap')).json()).user;
+  assert.equal(me.status,'阿蘇に向かってます <b>');assert.ok(!Number.isNaN(Date.parse(me.status_at)));
+  assert.equal((await owner('/api/private/settings',{status:'あ'.repeat(40)})).status,200);
+  await owner('/api/private/activities',activity({memo:'STATUS',publish:true}));
+  const feed=async()=>(await(await handle(request('/api/public/entries?u=local'),env)).json()).entries;
+  const rows=await feed();assert.ok(rows.length&&rows.every(e=>e.author_status==='あ'.repeat(40)&&e.author_status_at));
+  assert.equal((await(await handle(request('/api/public/users/local'),env)).json()).author_status,'あ'.repeat(40));
+  assert.equal((await(await handle(request('/api/public/session'),env,true)).json()).user.author_status,'あ'.repeat(40));
+  await owner('/api/private/settings',{map_visible:false});
+  assert.equal((await feed()).length,0);
+  assert.equal((await(await handle(request('/api/public/users/local'),env)).json()).author_status,null);
+  await owner('/api/private/settings',{map_visible:true});
+  assert.equal((await owner('/api/private/settings',{status:''})).status,200);
+  const cleared=(await(await owner('/api/private/bootstrap')).json()).user;assert.equal(cleared.status,null);assert.equal(cleared.status_at,null);
+  assert.ok((await feed()).every(e=>e.author_status===null));
+});
+
 test('hidden mode removes a person from the shared map without unpublishing; visible mode brings them back',async()=>{
   const made=await(await owner('/api/private/activities',activity({memo:'ON TRIP',publish:true}))).json();
   const has=async()=>(await(await handle(request('/api/public/entries'),env)).json()).entries.some(e=>e.id===made.public_id);
