@@ -72,15 +72,16 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
-      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
+      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
       handle ? [now, text(handle,'ユーザー',40)] : [now]).all();
-    const photos = await query(env.DB, "SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)",[now]).all();
+    const photos = await query(env.DB, "SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')",[now]).all();
     return json({entries:entries.results.map(e => ({...e, photos:photos.results.filter(p => p.entry_id === e.id).map(p => ({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`}))}))});
   }
   const profile = url.pathname.match(/^\/api\/public\/users\/([a-z0-9-]+)$/);
   if (profile) {
     const row = await query(env.DB, `SELECT u.handle,u.display_name,u.avatar_url,u.bio,u.tip_url,
       (SELECT COUNT(*) FROM public_entries p WHERE p.user_id=u.id AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)) entries,
+      EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=u.id AND s.key='map_visible' AND s.value='true') visible,
       (SELECT MIN(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') first_date,
       (SELECT MAX(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') last_date
       FROM users u WHERE u.handle=?`, [new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
@@ -88,7 +89,7 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
   }
   const photo = url.pathname.match(/^\/api\/public\/photos\/([a-z0-9-]+)$/);
   if (photo) {
-    const record = await query(env.DB,"SELECT f.object_key FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE f.id=? AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)",[photo[1],new Date().toISOString()]).first<{object_key:string}>();
+    const record = await query(env.DB,"SELECT f.object_key FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE f.id=? AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')",[photo[1],new Date().toISOString()]).first<{object_key:string}>();
     if (!record) return json({error:'Not found'},404);
     const object = await env.FILES.get(record.object_key);
     return object ? new Response(object.body, {headers:{'Content-Type':'image/png','Cache-Control':'no-store'}}) : json({error:'Not found'},404);
@@ -117,7 +118,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
         query(db,'SELECT key,value FROM user_settings WHERE user_id=?',[uid]).all<{key:string;value:string}>(),
       ]);
       const setting = (key:string) => settings.results.find(row => row.key === key)?.value;
-      return json({user,categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0)}});
+      return json({user,categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0),map_visible:setting('map_visible') === 'true'}});
     }
     if (path === '/api/private/activities') {
       const offset = integer(Number(url.searchParams.get('offset') ?? 0),'ページ');
@@ -219,6 +220,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       const writes: D1PreparedStatement[]=[];
       const put=(key:string,value:string)=>writes.push(query(db,'INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[uid,key,value]));
       if (body.publish_default !== undefined) { if (typeof body.publish_default !== 'boolean') throw new InputError('公開の初期値が不正です'); put('publish_default',String(body.publish_default)); }
+      if (body.map_visible !== undefined) { if (typeof body.map_visible !== 'boolean') throw new InputError('表示モードが不正です'); put('map_visible',String(body.map_visible)); }
       if (body.publish_precision !== undefined) { const value=text(body.publish_precision,'公開の粒度',10); if (!['exact','city','hidden'].includes(value)) throw new InputError('公開の粒度が不正です'); put('publish_precision',value); }
       if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
       if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));

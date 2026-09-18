@@ -35,8 +35,6 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
       return secure(await privateApi(request,env,user!));
     }
     if (!['GET','HEAD'].includes(request.method)) return secure(json({error:'Method not allowed'},405));
-    // /u/<handle> is the public page filtered to one author; served from the same document.
-    if (/^\/u\/[a-z0-9-]+\/?$/.test(url.pathname)) { const rewritten=new URL(url); rewritten.pathname='/'; return secure(await env.ASSETS.fetch(new Request(rewritten,request))); }
     const asset=await env.ASSETS.fetch(new Request(url,request));
     const response=secure(asset, privatePath || url.pathname === '/vendor/maplibre-gl-worker.mjs');
     // App files change on every deploy; make browsers revalidate so phones never mix old and new code.

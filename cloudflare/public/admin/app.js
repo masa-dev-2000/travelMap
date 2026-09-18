@@ -27,7 +27,8 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.tip_url.value=data.user.tip_url||'';$('#public-link').href='/u/'+data.user.handle;}
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.tip_url.value=data.user.tip_url||'';}
+  $('#map-visible').checked=data.settings?.map_visible===true;
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');
   fillSelect($('#activity-form [name=category_id]'),categories.filter(c=>c.active&&c.kind==='activity'));
@@ -154,6 +155,7 @@ bindForm('#category-form','categories',value=>value,bootstrap);
 $('#transaction-form [name=kind]').onchange=txCategories;
 $('#locate').onclick=()=>{if(!navigator.geolocation){notify('現在地を取得できないブラウザです');return;}navigator.geolocation.getCurrentPosition(position=>{$('#activity-form [name=latitude]').value=position.coords.latitude;$('#activity-form [name=longitude]').value=position.coords.longitude;notify('現在地を入力しました');},()=>notify('現在地を取得できません。位置情報の許可を確認してください。'));};
 $('#publish-default').onchange=async event=>{const input=event.target;input.disabled=true;try{await api('settings',{publish_default:input.checked});notify(input.checked?'新しい記録は最初から公開になります':'新しい記録は最初は非公開になります');}catch(error){input.checked=!input.checked;notify(error.message);}finally{input.disabled=false;}};
+$('#map-visible').onchange=async event=>{const input=event.target;try{await api('settings',{map_visible:input.checked});notify(input.checked?'みんなの地図に表示します':'みんなの地図から隠しました');}catch(error){input.checked=!input.checked;notify(error.message);}};
 $('#publish-precision').onchange=async event=>{try{await api('settings',{publish_precision:event.target.value});notify('公開時の位置の出し方を保存しました');}catch(error){notify(error.message);}};
 $('#publish-delay').onchange=async event=>{try{await api('settings',{publish_delay_hours:Number(event.target.value)});notify('公開までの時間を保存しました');}catch(error){notify(error.message);}};
 $('#profile-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;try{const v=formValues(form);await api('settings',{display_name:v.display_name,handle:v.handle,bio:v.bio,tip_url:v.tip_url||null});await bootstrap();notify('プロフィールを保存しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};

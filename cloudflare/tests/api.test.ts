@@ -31,6 +31,7 @@ print(json.dumps(result))
   await DB.batch([['local-owner','local@localhost','local'],['u2','second@example.com','second']].map(([id,email,handle])=>DB.prepare('INSERT INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES(?,?,?,?,?,?,?)').bind(id,null,email,handle,handle,null,now)));
   await DB.batch(['action:activity','cost:expense','salary:income'].map(pair=>{const [id,kind]=pair.split(':');return DB.prepare('INSERT INTO categories(id,kind,name,user_id) VALUES(?,?,?,?)').bind(id,kind,id,'local-owner');}));
   await DB.prepare("INSERT INTO categories(id,kind,name,user_id) VALUES('u2-action','activity','u2','u2')").run();
+  await DB.prepare("INSERT INTO user_settings VALUES('local-owner','map_visible','true'),('u2','map_visible','true')").run();
   env={DB,FILES:await mf.getR2Bucket('FILES'),ASSETS:{fetch:async()=>new Response('static')},ACCESS_ISSUER:'',ACCESS_AUD:'',OWNER_EMAIL:'',GOOGLE_CLIENT_ID:'client-id',GOOGLE_CLIENT_SECRET:'client-secret'};
 });
 after(async()=>{await mf.dispose();});
@@ -273,4 +274,16 @@ test('login next only accepts /admin paths; profile settings validate handle and
   const mine=await(await handle(request('/api/public/entries?u=masa-test'),env)).json();
   assert.ok(mine.entries.every(e=>e.author==='masa-test'));
   await owner('/api/private/settings',{handle:'local'});
+});
+
+test('hidden mode removes a person from the shared map without unpublishing; visible mode brings them back',async()=>{
+  const made=await(await owner('/api/private/activities',activity({memo:'ON TRIP',publish:true}))).json();
+  const has=async()=>(await(await handle(request('/api/public/entries'),env)).json()).entries.some(e=>e.id===made.public_id);
+  assert.equal(await has(),true);
+  assert.equal((await owner('/api/private/settings',{map_visible:false})).status,200);
+  assert.equal(await has(),false);
+  assert.equal((await env.DB.prepare('SELECT status FROM public_entries WHERE id=?').bind(made.public_id).first()).status,'published');
+  assert.equal((await owner('/api/private/settings',{map_visible:'yes'})).status,400);
+  assert.equal((await owner('/api/private/settings',{map_visible:true})).status,200);
+  assert.equal(await has(),true);
 });

@@ -1,7 +1,7 @@
 {
   "scripts": {
-    "lint": "eslint \"travelMap/**/*.js\" \"inputTravelLog/**/*.js\" \"migration.js\"",
-    "test": "npm run lint",
+    "test": "npm --prefix cloudflare test",
+    "check": "npm --prefix cloudflare run check",
     "test:model": "python -m unittest discover -s data_model -v"
   },
   "dependencies": {
