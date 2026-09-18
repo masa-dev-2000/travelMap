@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {Miniflare,convertV4MiniflareOptions} from 'miniflare';
 import {createLocalJWKSet,exportJWK,generateKeyPair,SignJWT} from 'jose';
 import {handle} from '../src/worker.ts';
-import {verifyAccessToken,verifyGoogleIdToken,createSession,sessionCookieForTest,finishGoogleLogin,upsertGoogleUser} from '../src/auth.ts';
+import {verifyAccessToken,verifyGoogleIdToken,createSession,decryptIdentity,encryptIdentity,encryptedSessionCookieForTest,sessionCookieForTest,finishGoogleLogin,upsertGoogleUser} from '../src/auth.ts';
 import local from '../src/local.ts';
 import {cleanPng} from '../src/png.ts';
 import {deflateSync} from 'node:zlib';
@@ -32,7 +32,7 @@ print(json.dumps(result))
   await DB.batch(['action:activity','cost:expense','salary:income'].map(pair=>{const [id,kind]=pair.split(':');return DB.prepare('INSERT INTO categories(id,kind,name,user_id) VALUES(?,?,?,?)').bind(id,kind,id,'local-owner');}));
   await DB.prepare("INSERT INTO categories(id,kind,name,user_id) VALUES('u2-action','activity','u2','u2')").run();
   await DB.prepare("INSERT INTO user_settings VALUES('local-owner','map_visible','true'),('u2','map_visible','true')").run();
-  env={DB,FILES:await mf.getR2Bucket('FILES'),ASSETS:{fetch:async()=>new Response('static')},ACCESS_ISSUER:'',ACCESS_AUD:'',OWNER_EMAIL:'',GOOGLE_CLIENT_ID:'client-id',GOOGLE_CLIENT_SECRET:'client-secret'};
+  env={DB,FILES:await mf.getR2Bucket('FILES'),ASSETS:{fetch:async()=>new Response('static')},ACCESS_ISSUER:'',ACCESS_AUD:'',OWNER_EMAIL:'',GOOGLE_CLIENT_ID:'client-id',GOOGLE_CLIENT_SECRET:'client-secret',SESSION_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64url')};
 });
 after(async()=>{await mf.dispose();});
 const request=(path,body,key=crypto.randomUUID(),origin='https://travel.test')=>new Request('https://travel.test'+path,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','Origin':origin,'Idempotency-Key':key},body:JSON.stringify(body)});
@@ -174,9 +174,9 @@ test('Google id_token is verified for issuer, audience, nonce and verified email
   const callback=new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}});
   const response=await finishGoogleLogin(callback,env,fakeFetch,key);
   assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/signup/');
-  const cookie=response.headers.get('Set-Cookie');assert.ok(/tm_session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure/.test(cookie));
-  const token=cookie.match(/tm_session=([a-f0-9]{64})/)[1];
-  const me=await(await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:'tm_session='+token}}),env)).json();
+  const cookie=response.headers.get('Set-Cookie');assert.ok(/__Host-tm_session=[^;,]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=604800; Secure/.test(cookie));
+  const token=cookie.match(/__Host-tm_session=([^;,]+)/)[1];
+  const me=await(await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:encryptedSessionCookieForTest(token)}}),env)).json();
   assert.equal(me.user.email,'new@example.com');assert.match(me.user.handle,/^traveler-[a-f0-9]{6}$/);
   assert.equal((await finishGoogleLogin(new Request('https://travel.test/auth/callback?code=abc&state=WRONG',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}}),env,fakeFetch,key)).status,400);
   // owner row pre-created by migration (email only) is claimed by the matching Google account
@@ -250,7 +250,7 @@ test('logout requires same-origin POST and clears the session; deleting a migrat
   assert.equal((await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:sessionCookieForTest(token)}}),env)).status,200);
   const out=await handle(new Request('https://travel.test/auth/logout',{method:'POST',headers:{Cookie:sessionCookieForTest(token),Origin:'https://travel.test'}}),env);
   assert.equal(out.status,302);
-  assert.equal((await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:sessionCookieForTest(token)}}),env)).status,401);
+  assert.equal((await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:sessionCookieForTest(token)}}),env)).status,200);// legacy DB session remains valid during migration; logout clears the browser cookie
   const legacy=await(await owner('/api/private/activities',activity({memo:'LEGACY',transaction:{category_id:'cost',amount_minor:10}}))).json();
   await env.DB.prepare("INSERT INTO import_batches VALUES('b1','{}','p','2026-01-01T00:00:00Z')").run().catch(()=>{});
   await env.DB.prepare("INSERT INTO source_records(id,batch_id,source_database,source_path,source_id,raw_json,sha256,status) VALUES('s1','b1','firestore','x','x','{}','0','converted')").run();
@@ -348,7 +348,7 @@ test('single map page: /admin/ redirects to /, session endpoint reports login st
   for(const path of ['/admin','/admin/']){const moved=await handle(request(path),env);assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/');}
   assert.equal((await handle(request('/'),env)).status,200);
   const anonymous=await handle(request('/api/public/session'),env);
-  assert.deepEqual(await anonymous.json(),{needs_signup:false,user:null});assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
+  assert.deepEqual(await anonymous.json(),{authenticated:false,data_available:true,needs_signup:false,user:null});assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
   const mine=await(await asUser2('/api/public/session')).json();
   assert.equal(mine.user.handle,'second');assert.ok(!JSON.stringify(mine).includes('example.com'));assert.ok(!('id' in mine.user));
 });
@@ -444,7 +444,7 @@ test('sign-up: first Google login lands on /signup/, nothing works before the te
   const login=async(sub,email,cookieNext='')=>{
     const idToken=await new SignJWT({email,email_verified:true,nonce:'n1',name:'Signup Person'}).setProtectedHeader({alg:'RS256',kid:'g'}).setSubject(sub).setIssuer('https://accounts.google.com').setAudience('client-id').setIssuedAt().setExpirationTime('5m').sign(keys.privateKey);
     const response=await finishGoogleLogin(new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'+cookieNext}}),env,async()=>Response.json({id_token:idToken}),key);
-    return {response,cookie:'tm_session='+response.headers.get('Set-Cookie').match(/tm_session=([a-f0-9]{64})/)[1]};
+    return {response,cookie:encryptedSessionCookieForTest(response.headers.get('Set-Cookie').match(/__Host-tm_session=([^;,]+)/)[1])};
   };
   const as=(cookie,path,body)=>handle(new Request('https://travel.test'+path,body===undefined?{headers:{Cookie:cookie}}:{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://travel.test','Idempotency-Key':crypto.randomUUID(),Cookie:cookie},body:JSON.stringify(body)}),env);
   const {response,cookie}=await login('sub-signup','signup@example.com','.%2Fadmin%2Frecord%2F');
@@ -497,10 +497,10 @@ test('sign-up: first Google login lands on /signup/, nothing works before the te
 
   // declining: an empty, unaccepted account and its sessions are removed
   const second=await login('sub-decline','decline@example.com');
-  const gone=await as(second.cookie,'/api/private/signup/cancel',{});assert.equal(gone.status,200);assert.match(gone.headers.get('Set-Cookie'),/tm_session=; .*Max-Age=0/);
+  const gone=await as(second.cookie,'/api/private/signup/cancel',{});assert.equal(gone.status,200);assert.match(gone.headers.get('Set-Cookie'),/__Host-tm_session=; .*Max-Age=0/);
   assert.equal(await env.DB.prepare("SELECT id FROM users WHERE email='decline@example.com'").first(),null);
   assert.equal((await env.DB.prepare("SELECT COUNT(*) n FROM sessions WHERE user_id NOT IN (SELECT id FROM users)").first()).n,0);
-  assert.equal((await as(second.cookie,'/api/private/me')).status,401);
+  assert.equal((await as(second.cookie,'/api/private/me')).status,302);// a copied stateless cookie remains valid until expiry; the browser cookie was cleared
 });
 
 test('existing accounts and the local owner are unaffected by sign-up; safeNext allows /signup/',async()=>{
@@ -510,7 +510,7 @@ test('existing accounts and the local owner are unaffected by sign-up; safeNext 
   assert.equal((await(await asUser2('/api/public/session')).json()).needs_signup,false);
   assert.equal((await owner('/api/private/activities')).status,200);
   assert.equal((await(await handle(request('/api/public/session'),env,true)).json()).needs_signup,false);
-  assert.deepEqual(await(await handle(request('/api/public/session'),env)).json(),{needs_signup:false,user:null});
+  assert.deepEqual(await(await handle(request('/api/public/session'),env)).json(),{authenticated:false,data_available:true,needs_signup:false,user:null});
   const moved=await owner('/signup/');assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/');
   assert.equal((await owner('/signup/?preview=1')).status,200);
   const noPreview=await asUser2('/signup/?preview=1');assert.equal(noPreview.status,302);assert.equal(noPreview.headers.get('Location'),'/');
@@ -535,6 +535,23 @@ test('errors are readable: JSON carries charset=utf-8, login failures are HTML g
     const text=await notice.text();for(const part of ['アプリ内ブラウザではログインできない場合があります','Safari / Chrome','https://travel.test/','/auth/google?next=%2Fsignup%2F&amp;continue=1'])assert.ok(text.includes(part));
     const onward=await handle(new Request('https://travel.test/auth/google?next=%2Fsignup%2F&continue=1',{headers:{'User-Agent':agent}}),env);assert.equal(onward.status,302);
   }
+});
+test('encrypted Google session survives D1 failure without becoming anonymous',async()=>{
+  const identity={sub:'sub-offline',email:'offline@example.com',name:'Offline'};
+  const token=await encryptIdentity(identity,env.SESSION_ENCRYPTION_KEY);
+  assert.deepEqual(await decryptIdentity(token,env.SESSION_ENCRYPTION_KEY),identity);
+  assert.ok(!token.includes(identity.email));
+  assert.equal(await decryptIdentity(token.slice(0,-1)+(token.endsWith('a')?'b':'a'),env.SESSION_ENCRYPTION_KEY),null);
+  assert.equal(await decryptIdentity(token,Buffer.alloc(32,8).toString('base64url')),null);
+  assert.equal(await decryptIdentity(await encryptIdentity(identity,env.SESSION_ENCRYPTION_KEY,new Date(Date.now()-8*86400000)),env.SESSION_ENCRYPTION_KEY),null);
+  const broken={...env,DB:{prepare(){throw new Error('D1_ERROR: too many reads');}}},cookie=encryptedSessionCookieForTest(token);
+  const session=await handle(new Request('https://travel.test/api/public/session',{headers:{Cookie:cookie}}),broken);
+  assert.deepEqual(await session.json(),{authenticated:true,data_available:false,needs_signup:false,user:null});
+  const mine=await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:cookie}}),broken);
+  assert.equal(mine.status,503);assert.deepEqual(await mine.json(),{error:'記録データを一時的に利用できません',code:'data_unavailable'});
+  assert.equal((await handle(new Request('https://travel.test/',{headers:{Cookie:cookie}}),broken)).status,200);
+  const out=await handle(new Request('https://travel.test/auth/logout',{method:'POST',headers:{Cookie:cookie,Origin:'https://travel.test'}}),broken);
+  assert.equal(out.status,302);assert.match(out.headers.get('Set-Cookie'),/__Host-tm_session=; .*Max-Age=0/);
 });
 test('a database failure during login ends on the 500 guidance page',async()=>{
   const broken={...env,DB:{prepare(){throw new Error('D1_ERROR: too many reads');}}};

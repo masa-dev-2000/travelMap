@@ -85,6 +85,12 @@ node scripts/cloudflare.mjs d1 execute travelmap --remote --file ../../github-ac
 
 ## Phase 5：公開前の検証と公開
 
+Googleログイン後のセッションは、D1ではなく7日間の認証付き暗号化Cookieで維持する。
+本番デプロイ前に32バイトのランダム鍵をbase64url形式で生成し、値を表示・保存せず
+`node scripts/cloudflare.mjs secret put SESSION_ENCRYPTION_KEY` で登録する。
+このsecretが無い状態では新しいログインを拒否する。鍵の交換は全利用者の強制ログアウトになる。
+D1障害時はGoogle認証状態を維持し、私的データAPIだけ503 `data_unavailable` とする。
+
 ```text
 npm run check
 npm test

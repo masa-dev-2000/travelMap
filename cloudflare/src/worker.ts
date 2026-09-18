@@ -1,4 +1,4 @@
-import { currentUser, finishGoogleLogin, loginErrorPage, logout, startGoogleLogin, type User } from './auth.ts';
+import { authentication, continueGoogleLogin, dataUnavailablePage, finishGoogleLogin, loginErrorPage, logout, startGoogleLogin, type AuthState, type User } from './auth.ts';
 import { json, privateApi, publicApi } from './api.ts';
 import { InputError } from './validation.ts';
 
@@ -18,8 +18,9 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
   try {
     if (url.pathname === '/api/public/session' && request.method === 'GET') {
       // Login state for the single map page. Only public profile fields; private data stays behind /api/private/*.
-      const who = localOwner ? await localUser(env) : await currentUser(request,env);
-      return secure(json({needs_signup:!!who && !who.terms_accepted_at,user: who ? {handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version == null ? null : `/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status ?? null,author_status_at:who.status_at ?? null} : null}));
+      const state:AuthState=localOwner?{authenticated:true,dataAvailable:true,identity:null,user:await localUser(env)}:await authentication(request,env),who=state.user;
+      const response=secure(json({authenticated:state.authenticated,data_available:state.dataAvailable,needs_signup:!!who&&!who.terms_accepted_at,user:who?{handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version==null?null:`/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status??null,author_status_at:who.status_at??null}:null}));
+      if(state.migrateCookie)response.headers.append('Set-Cookie',state.migrateCookie);return response;
     }
     if (url.pathname.startsWith('/api/public/')) {
       // The shared feed is identical for every viewer and costs the most D1 reads; reuse it for a short time at the edge.
@@ -32,9 +33,9 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     }
     // The old owner page moved to the single map page at /.
     if (['/admin','/admin/','/admin/index.html'].includes(url.pathname)) return secure(new Response(null,{status:302,headers:{Location:'/'}}));
-    if (['/auth/google','/auth/callback'].includes(url.pathname) && request.method === 'GET') {
+    if (['/auth/google','/auth/callback','/auth/continue'].includes(url.pathname) && request.method === 'GET') {
       // Login problems (including database errors) end on a guidance page, never on raw JSON.
-      try { return secure(await (url.pathname === '/auth/google' ? startGoogleLogin(request,env) : finishGoogleLogin(request,env))); }
+      try { return secure(await (url.pathname === '/auth/google' ? startGoogleLogin(request,env) : url.pathname==='/auth/callback'?finishGoogleLogin(request,env):continueGoogleLogin(request,env))); }
       catch { console.error(JSON.stringify({event:'login_failed',request_id:crypto.randomUUID()})); return secure(loginErrorPage(500,'いま混み合っているか、一時的に処理できませんでした。',request)); }
     }
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
@@ -45,8 +46,13 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     const signupPage=['/signup','/signup/','/signup/index.html'].includes(url.pathname), mapPage=['/','/index.html'].includes(url.pathname);
     let user: User | null = null;
     if (privatePath || signupPage || mapPage) {
-      user = localOwner ? await localUser(env) : await currentUser(request,env);
-      if (!user && !mapPage) {
+      const state:AuthState=localOwner?{authenticated:true,dataAvailable:true,identity:null,user:await localUser(env)}:await authentication(request,env);user=state.user;
+      if(state.authenticated&&!state.dataAvailable){
+        if(url.pathname.startsWith('/api/private/'))return secure(json({error:'記録データを一時的に利用できません',code:'data_unavailable'},503));
+        if(!mapPage)return secure(dataUnavailablePage(request,url.pathname+url.search));
+      }
+      if(state.authenticated&&state.dataAvailable&&!user)return secure(new Response(null,{status:302,headers:{Location:`/auth/continue?next=${encodeURIComponent(mapPage?'/':url.pathname+url.search)}`}}));
+      if (!user && !state.authenticated && !mapPage) {
         if (url.pathname.startsWith('/api/private/')) return secure(json({error:'ログインが必要です',login:'/auth/google'},401));
         return secure(new Response(null,{status:302,headers:{Location:signupPage ? '/auth/google?next=%2Fsignup%2F' : '/auth/google'}}));
       }

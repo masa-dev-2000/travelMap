@@ -374,7 +374,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       const used=await query(db,'SELECT (SELECT COUNT(*) FROM activities WHERE user_id=?)+(SELECT COUNT(*) FROM transactions WHERE user_id=?)+(SELECT COUNT(*) FROM trips WHERE user_id=?)+(SELECT COUNT(*) FROM attachments WHERE user_id=?) n',[uid,uid,uid,uid]).first<{n:number}>();
       if (used?.n) throw new InputError('記録があるため、アカウントを削除できません');
       await db.batch([query(db,'DELETE FROM categories WHERE user_id=?',[uid]),query(db,'DELETE FROM user_settings WHERE user_id=?',[uid]),query(db,'DELETE FROM footprints WHERE viewer_id=? OR owner_id=?',[uid,uid]),query(db,'DELETE FROM sessions WHERE user_id=?',[uid]),query(db,'DELETE FROM users WHERE id=? AND terms_accepted_at IS NULL',[uid])]);
-      return json({deleted:true},200,{'Set-Cookie':`tm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${url.protocol === 'https:' ? '; Secure' : ''}`});
+      return json({deleted:true},200,{'Set-Cookie':`__Host-tm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${url.protocol === 'https:' ? '; Secure' : ''}`});
     }
     // 記録の編集（本人のものだけ）。公開中なら本文・場所・位置を公開側にも反映する
     const edit = path.match(/^\/api\/private\/activities\/([a-z0-9-]+)$/);

@@ -1,13 +1,15 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { createRemoteJWKSet, EncryptJWT, jwtDecrypt, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
 export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null; terms_accepted_at?: string | null};
 // Only the map page (exactly "/"), the sign-up page and same-origin paths under /admin may be used as a post-login destination.
 export const safeNext = (value: string | null) => value && (value === '/' || value === '/signup/' || /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value)) ? value : '/';
-type AuthEnv = Pick<Env, 'DB' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>;
+export type AuthIdentity = {sub:string; email:string; name?:string; picture?:string};
+export type AuthState = {authenticated:boolean; dataAvailable:boolean; identity:AuthIdentity|null; user:User|null; migrateCookie?:string};
+type AuthEnv = Pick<Env, 'DB' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'SESSION_ENCRYPTION_KEY' | 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>;
 
-const SESSION_COOKIE = 'tm_session', FLOW_COOKIE = 'tm_oauth';
-const SESSION_DAYS = 30, FLOW_MINUTES = 10;
+const SESSION_COOKIE = '__Host-tm_session', LEGACY_SESSION_COOKIE = 'tm_session', FLOW_COOKIE = 'tm_oauth';
+const SESSION_DAYS = 7, FLOW_MINUTES = 10;
 const GOOGLE_ISSUERS = ['https://accounts.google.com', 'accounts.google.com'];
 const googleKeys = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 
@@ -19,6 +21,21 @@ const secure = (url: URL) => url.protocol === 'https:';
 function setCookie(name: string, value: string, url: URL, maxAgeSeconds: number): string {
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure(url) ? '; Secure' : ''}`;
 }
+function sessionKey(value?:string):Uint8Array {
+  if(!value)throw new Error('SESSION_ENCRYPTION_KEY is not configured');
+  try { const bytes=Uint8Array.from(atob(value.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));if(bytes.length!==32)throw new Error();return bytes; }
+  catch { throw new Error('SESSION_ENCRYPTION_KEY must be a base64url-encoded 32-byte key'); }
+}
+export async function encryptIdentity(identity:AuthIdentity,secret:string,now=new Date()):Promise<string>{
+  return new EncryptJWT(identity).setProtectedHeader({alg:'dir',enc:'A256GCM',typ:'JWT'}).setIssuer('travelmap').setAudience('travelmap-session').setIssuedAt(Math.floor(now.getTime()/1000)).setExpirationTime(Math.floor(now.getTime()/1000)+SESSION_DAYS*86400).encrypt(sessionKey(secret));
+}
+export async function decryptIdentity(token:string,secret?:string):Promise<AuthIdentity|null>{
+  try { const {payload}=await jwtDecrypt(token,sessionKey(secret),{issuer:'travelmap',audience:'travelmap-session',keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM']});
+    if(typeof payload.sub!=='string'||typeof payload.email!=='string')return null;
+    return {sub:payload.sub,email:payload.email,...(typeof payload.name==='string'?{name:payload.name}:{}),...(typeof payload.picture==='string'?{picture:payload.picture}:{})};
+  } catch { return null; }
+}
+async function identityCookie(identity:AuthIdentity,env:AuthEnv,url:URL):Promise<string>{return setCookie(SESSION_COOKIE,await encryptIdentity(identity,env.SESSION_ENCRYPTION_KEY!),url,SESSION_DAYS*86400);}
 
 // Legacy Cloudflare Access assertion, kept for the transition; it maps to the owner account only.
 export async function verifyAccessToken(token: string, env: Pick<Env, 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>,
@@ -38,16 +55,32 @@ export async function userById(db: D1Database, id: string): Promise<User | null>
 
 // Resolves the signed-in user from the session cookie, or from a legacy Access assertion for the owner.
 export async function currentUser(request: Request, env: AuthEnv): Promise<User | null> {
-  const raw = cookies(request)[SESSION_COOKIE];
+  return (await authentication(request,env)).user;
+}
+
+// Authentication is independent from D1. D1 only resolves the Google subject to application data.
+export async function authentication(request:Request,env:AuthEnv):Promise<AuthState>{
+  const jar=cookies(request), encrypted=jar[SESSION_COOKIE];
+  if(encrypted){
+    const identity=await decryptIdentity(encrypted,env.SESSION_ENCRYPTION_KEY);
+    if(identity){try{return {authenticated:true,dataAvailable:true,identity,user:await query(env.DB,'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE google_sub=?',[identity.sub]).first<User>()};}
+      catch{return {authenticated:true,dataAvailable:false,identity,user:null};}}
+  }
+  const raw = jar[LEGACY_SESSION_COOKIE];
   if (raw && /^[a-f0-9]{64}$/.test(raw)) {
-    const session = await query(env.DB, 'SELECT user_id,expires_at FROM sessions WHERE id_hash=?', [await sha256(new TextEncoder().encode(raw))]).first<{user_id: string; expires_at: string}>();
-    if (session && session.expires_at > new Date().toISOString()) return userById(env.DB, session.user_id);
+    try { const row=await query(env.DB,'SELECT u.id,u.google_sub,u.email,u.display_name,u.handle,u.avatar_url,u.icon,u.icon_version,u.bio,u.tip_url,u.status,u.status_at,u.terms_accepted_at,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?',[await sha256(new TextEncoder().encode(raw))]).first<User&{google_sub:string|null;expires_at:string}>();
+      if(row&&row.expires_at>new Date().toISOString()){
+        if(row.google_sub){const identity={sub:row.google_sub,email:row.email,name:row.display_name,picture:row.avatar_url??undefined};return {authenticated:true,dataAvailable:true,identity,user:row,migrateCookie:await identityCookie(identity,env,new URL(request.url))};}
+        return {authenticated:true,dataAvailable:true,identity:null,user:row};
+      }
+    } catch { return {authenticated:false,dataAvailable:false,identity:null,user:null}; }
   }
   const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
   if (assertion && await verifyAccessToken(assertion, env)) {
-    return await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();
+    try { const user=await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();return {authenticated:!!user,dataAvailable:true,identity:null,user}; }
+    catch{return {authenticated:true,dataAvailable:false,identity:null,user:null};}
   }
-  return null;
+  return {authenticated:false,dataAvailable:true,identity:null,user:null};
 }
 
 async function createSession(db: D1Database, userId: string): Promise<string> {
@@ -102,6 +135,10 @@ const IN_APP_NOTE = '<p class="muted">LINEやInstagramなどのアプリ内ブ�
 export function loginErrorPage(status: number, detail: string, request: Request, headers: Record<string, string> = {}): Response {
   return page(status, 'ログインできませんでした', `<p>${escapeHtml(detail)}</p><p>時間をおいてもう一度お試しください。</p>${IN_APP_BROWSER.test(request.headers.get('User-Agent') ?? '') ? IN_APP_NOTE : ''}<a class="btn main" href="/auth/google">もう一度ログインする</a><a class="btn sub" href="/">地図に戻る</a>`, headers);
 }
+export function dataUnavailablePage(request:Request,next='/',cookiesToSet:string[]=[]):Response{
+  const safe=safeNext(next),response=page(503,'ログインは完了しました',`<p>Googleでの本人確認は完了しています。</p><p>現在、記録データを一時的に利用できません。復旧後に続きから再開できます。</p><a class="btn main" href="/auth/continue?next=${encodeURIComponent(safe)}">もう一度確認する</a><a class="btn sub" href="/">地図を見る</a>`);
+  for(const cookie of cookiesToSet)response.headers.append('Set-Cookie',cookie);return response;
+}
 
 export async function startGoogleLogin(request: Request, env: AuthEnv): Promise<Response> {
   const url = new URL(request.url);
@@ -140,20 +177,30 @@ export async function finishGoogleLogin(request: Request, env: AuthEnv, fetchTok
   const tokens = await tokenResponse.json() as {id_token?: string};
   const claims = tokens.id_token ? await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID, nonce, key) : null;
   if (!claims) return fail('Googleアカウントを確認できませんでした。');
-  const user = await upsertGoogleUser(env.DB, claims);
-  const session = await createSession(env.DB, user.id);
-  // First login: nothing is usable until the terms are accepted on the sign-up page.
-  const headers = new Headers({Location: user.terms_accepted_at ? safeNext(decodeURIComponent(next ?? '')) : '/signup/'});
+  const identity:AuthIdentity={sub:claims.sub,email:claims.email,name:claims.name,picture:claims.picture};
+  const headers = new Headers();
   headers.append('Set-Cookie', clearFlow);
-  headers.append('Set-Cookie', setCookie(SESSION_COOKIE, session, url, SESSION_DAYS * 86400));
-  return new Response(null, {status: 302, headers});
+  headers.append('Set-Cookie', await identityCookie(identity,env,url));
+  const destination=safeNext(decodeURIComponent(next ?? ''));
+  try { const user=await upsertGoogleUser(env.DB,claims);headers.set('Location',user.terms_accepted_at?destination:'/signup/');return new Response(null,{status:302,headers}); }
+  catch(error){console.error(JSON.stringify({event:'login_data_unavailable',request_id:crypto.randomUUID()}));return dataUnavailablePage(request,destination,[clearFlow,await identityCookie(identity,env,url)]);}
 }
 
-export async function logout(request: Request, env: AuthEnv): Promise<Response> {
-  const url = new URL(request.url), raw = cookies(request)[SESSION_COOKIE];
-  if (raw && /^[a-f0-9]{64}$/.test(raw)) await query(env.DB, 'DELETE FROM sessions WHERE id_hash=?', [await sha256(new TextEncoder().encode(raw))]).run();
-  return new Response(null, {status: 302, headers: {Location: '/', 'Set-Cookie': setCookie(SESSION_COOKIE, '', url, 0)}});
+export async function continueGoogleLogin(request:Request,env:AuthEnv):Promise<Response>{
+  const url=new URL(request.url),next=safeNext(url.searchParams.get('next')),state=await authentication(request,env);
+  if(!state.authenticated||!state.identity)return new Response(null,{status:302,headers:{Location:`/auth/google?next=${encodeURIComponent(next)}`}});
+  if(!state.dataAvailable)return dataUnavailablePage(request,next);
+  let user=state.user;
+  if(!user){try{user=await upsertGoogleUser(env.DB,state.identity);}catch{return dataUnavailablePage(request,next);}}
+  return new Response(null,{status:302,headers:{Location:user.terms_accepted_at?next:'/signup/'}});
 }
 
-export function sessionCookieForTest(token: string): string { return `${SESSION_COOKIE}=${token}`; }
+export async function logout(request: Request, _env: AuthEnv): Promise<Response> {
+  const url = new URL(request.url),headers=new Headers({Location:'/'});
+  headers.append('Set-Cookie',setCookie(SESSION_COOKIE,'',url,0));headers.append('Set-Cookie',setCookie(LEGACY_SESSION_COOKIE,'',url,0));
+  return new Response(null,{status:302,headers});
+}
+
+export function sessionCookieForTest(token: string): string { return `${LEGACY_SESSION_COOKIE}=${token}`; }
+export function encryptedSessionCookieForTest(token:string):string{return `${SESSION_COOKIE}=${token}`;}
 export { createSession };
