@@ -60,31 +60,35 @@ async function saveOnce(request: Request, db: D1Database, uid: string, body: Inp
   return json(result, 201);
 }
 
+// Travel mode: map_visible is on and the optional auto-off time (map_visible_until) has not passed. Binds one ISO timestamp.
+const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?))`;
+
 export async function publicApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method !== 'GET') return json({error:'Method not allowed'},405);
   if (url.pathname === '/api/public/entries') {
     // precision decides what leaves the server: 'city' drops coordinates, 'hidden' drops place and coordinates. Delayed entries stay invisible until publish_at.
     const handle = url.searchParams.get('u'), now = new Date().toISOString();
-    const entries = await query(env.DB, `SELECT p.id,p.date,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
+    // 'at' (exact time, for "3 hours ago") is only exposed for entries published without a delay whose public date was not edited.
+    const entries = await query(env.DB, `SELECT p.id,p.date,CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
       tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
-      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
-      handle ? [now, text(handle,'ユーザー',40)] : [now]).all();
-    const photos = await query(env.DB, "SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')",[now]).all();
+      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
+      handle ? [now, now, text(handle,'ユーザー',40)] : [now, now]).all();
+    const photos = await query(env.DB, `SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}`,[now,now]).all();
     return json({entries:entries.results.map(e => ({...e, photos:photos.results.filter(p => p.entry_id === e.id).map(p => ({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`}))}))});
   }
   const profile = url.pathname.match(/^\/api\/public\/users\/([a-z0-9-]+)$/);
   if (profile) {
     const row = await query(env.DB, `SELECT u.handle,u.display_name,u.avatar_url,u.bio,u.tip_url,
       (SELECT COUNT(*) FROM public_entries p WHERE p.user_id=u.id AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?)) entries,
-      EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=u.id AND s.key='map_visible' AND s.value='true') visible,
+      ${travelling('u.id')} visible,
       (SELECT MIN(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') first_date,
       (SELECT MAX(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') last_date
-      FROM users u WHERE u.handle=?`, [new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
+      FROM users u WHERE u.handle=?`, [new Date().toISOString(), new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
     return row ? json(row) : json({error:'Not found'},404);
   }
   const icon = url.pathname.match(/^\/api\/public\/icons\/([a-z0-9-]+)$/);
@@ -95,7 +99,7 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
   }
   const photo = url.pathname.match(/^\/api\/public\/photos\/([a-z0-9-]+)$/);
   if (photo) {
-    const record = await query(env.DB,"SELECT f.object_key FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE f.id=? AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=p.user_id AND s.key='map_visible' AND s.value='true')",[photo[1],new Date().toISOString()]).first<{object_key:string}>();
+    const record = await query(env.DB,`SELECT f.object_key FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE f.id=? AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}`,[photo[1],new Date().toISOString(),new Date().toISOString()]).first<{object_key:string}>();
     if (!record) return json({error:'Not found'},404);
     const object = await env.FILES.get(record.object_key);
     return object ? new Response(object.body, {headers:{'Content-Type':'image/png','Cache-Control':'no-store'}}) : json({error:'Not found'},404);
@@ -124,7 +128,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
         query(db,'SELECT key,value FROM user_settings WHERE user_id=?',[uid]).all<{key:string;value:string}>(),
       ]);
       const setting = (key:string) => settings.results.find(row => row.key === key)?.value;
-      return json({user:{...user,icon_url:user.icon_version == null ? null : `/api/public/icons/${user.handle}?v=${user.icon_version}`},categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0),map_visible:setting('map_visible') === 'true'}});
+      return json({user:{...user,icon_url:user.icon_version == null ? null : `/api/public/icons/${user.handle}?v=${user.icon_version}`},categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0),map_visible:setting('map_visible') === 'true' && !(setting('map_visible_until') && setting('map_visible_until')! <= new Date().toISOString()),map_visible_until:setting('map_visible_until') || null}});
     }
     if (path === '/api/private/activities') {
       const offset = integer(Number(url.searchParams.get('offset') ?? 0),'ページ');
@@ -238,7 +242,9 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       const writes: D1PreparedStatement[]=[];
       const put=(key:string,value:string)=>writes.push(query(db,'INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[uid,key,value]));
       if (body.publish_default !== undefined) { if (typeof body.publish_default !== 'boolean') throw new InputError('公開の初期値が不正です'); put('publish_default',String(body.publish_default)); }
-      if (body.map_visible !== undefined) { if (typeof body.map_visible !== 'boolean') throw new InputError('表示モードが不正です'); put('map_visible',String(body.map_visible)); }
+      if (body.map_visible !== undefined) { if (typeof body.map_visible !== 'boolean') throw new InputError('旅モードが不正です'); put('map_visible',String(body.map_visible)); if (body.map_visible_days === undefined) put('map_visible_until',''); }
+      // Auto-off: 0 = until switched off by hand, otherwise travel mode ends that many days from now.
+      if (body.map_visible_days !== undefined) { const days=integer(body.map_visible_days,'自動オフまでの日数',365); put('map_visible_until',days ? new Date(Date.now()+days*86400000).toISOString() : ''); }
       if (body.publish_precision !== undefined) { const value=text(body.publish_precision,'公開の粒度',10); if (!['exact','city','hidden'].includes(value)) throw new InputError('公開の粒度が不正です'); put('publish_precision',value); }
       if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
       if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));

@@ -1,25 +1,9 @@
-import {api,apiDelete,el,yen} from '/shared.js';
-import {mapShell} from '/map-shell.js';
-import {makeOwnerMap} from '/owner-map.js';
-import {makeOwnerRoute} from '/owner-route.js';
-import {makeOwnerFriends} from '/owner-friends.js';
-const $=selector=>document.querySelector(selector), message=$('#message');
-document.body.append($('#share-dialog'));
-const filters=el('div',{className:'row'});filters.append($('#trip-filter').closest('label'),$('#refresh'));
-const shell=mapShell([
-  {id:'records',label:'記録',icon:'▤',nodes:[filters,$('#activities').closest('section')]},
-  {id:'money',label:'収支',icon:'¥',nodes:[$('#summary').closest('section'),$('#transactions').closest('details')]},
-  {id:'add',label:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#activity-form').closest('details'),$('#transaction-form').closest('details')]},
-  {id:'settings',label:'設定',icon:'⚑',nodes:[$('#settings-panel'),$('#trip-form').closest('details'),$('#review-note')]},
-]);
-const map=makeOwnerMap();
-const route=makeOwnerRoute(map,shell);
-const friends=makeOwnerFriends(map,shell);
-function fitRecords(){const extra=friends.points();if(extra.length)route.fitPoints([...route.points(),...extra]);else route.fitAll();}
-shell.fit.onclick=()=>{shell.hide();fitRecords();};
+import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
+// ログイン中だけ読み込む: 自分の記録一覧・編集・公開設定、収支、旅と分類、記録フォーム、設定シート。私的データは /api/private/* からだけ取る
+export async function startMe({shell,map,route,everyone,fitRecords,notify,me}){
+const $=selector=>document.querySelector(selector);
 let categories=[], trips=[], activityOffset=null, transactionOffset=null;
-let noticeTimer,activityGeneration=0;
-function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
+let activityGeneration=0,allRecords=[],publicFilter=null;
 function formValues(form){return Object.fromEntries(new FormData(form));}
 function localNow(now=new Date()){return new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);}
 function fillSelect(select,items,empty){select.replaceChildren();if(empty) select.append(new Option(empty,''));for(const item of items)select.append(new Option(item.name,item.id));}
@@ -29,8 +13,8 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);friends.setSelf(data.user.handle);pf.elements.tip_url.value=data.user.tip_url||'';}
-  $('#map-visible').checked=data.settings?.map_visible===true;
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);everyone.setSelf(data.user.handle);paintFace(data.user);pf.elements.tip_url.value=data.user.tip_url||'';}
+  paintTravel(data.settings?.map_visible===true,data.settings?.map_visible_until);
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');
   fillSelect($('#activity-form [name=category_id]'),categories.filter(c=>c.active&&c.kind==='activity'));
@@ -57,7 +41,7 @@ async function activities(reset=true){
   for(const item of data.activities){
     count++;
     const entry=el('details',{className:'card'}),preview=el('summary',{className:'record-preview'}),card=el('div',{className:'record-content'}), actions=el('div',{className:'card-actions'});
-    preview.append(el('time',{textContent:new Date(item.occurred_at).toLocaleString('ja-JP')}),el('strong',{textContent:item.observed_place_name||item.category_name}),el('p',{textContent:item.memo}));entry.append(preview,card);
+    preview.append(el('time',{textContent:(item.public_status==='published'?'':'🔒 ')+new Date(item.occurred_at).toLocaleString('ja-JP')}),el('strong',{textContent:item.observed_place_name||item.category_name}),el('p',{textContent:item.memo}));entry.append(preview,card);
     const badgeText=item.public_status==='published'?(item.publish_at&&item.publish_at>new Date().toISOString()?'公開予約':'公開中')+({city:'・場所名のみ',hidden:'・位置なし'}[item.public_precision]??''):'非公開';
     card.append(el('p',{className:'eyebrow',textContent:new Date(item.occurred_at).toLocaleString('ja-JP')}),el('h2',{textContent:item.observed_place_name || item.category_name}),el('p',{className:'memo',textContent:item.memo}),el('span',{className:'badge',textContent:badgeText}));
     if(item.spent_jpy!=null)card.append(el('p',{className:'spent',textContent:yen(item.spent_jpy)}));
@@ -71,13 +55,13 @@ async function activities(reset=true){
     const purposeLabel=el('label',{textContent:'用途'}),fileLabel=el('label',{textContent:'ファイル'});purposeLabel.append(purpose);fileLabel.append(file);attachmentForm.append(purposeLabel,fileLabel,el('button',{textContent:'非公開で添付'}));
     attachmentForm.onsubmit=async event=>{event.preventDefault();const button=attachmentForm.querySelector('button');button.disabled=true;try{const selected=file.files[0];if(!selected||selected.size>8*1024*1024)throw new Error('8MB以内のファイルを選択してください');const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:item.id,purpose:purpose.value}),{method:'POST',headers:{'Content-Type':selected.type},body:selected});const result=await response.json();if(!response.ok)throw new Error(result.error);file.value='';notify('非公開で添付しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
     detail.append(title,attachmentForm);card.append(detail);$('#activities').append(entry);
-    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('records');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)map.easeTo({center:[item.longitude,item.latitude]});});}
+    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('me');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)map.easeTo({center:[item.longitude,item.latitude]});});}
   }
   if(reset&&data.activities.length===0)$('#activities').append(el('p',{textContent:'まだ記録がありません。'}));
   activityOffset=data.next_offset;$('#more-activities').hidden=true;
   shell.count.textContent=`${count}件${activityOffset!==null?' 読み込み中…':` · 地図${located}件`}`;
   } while(activityOffset!==null);
-  route.render(routeRecords);
+  allRecords=routeRecords;drawOwn();
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
@@ -129,7 +113,7 @@ async function transactions(reset=true){
   transactionOffset=data.next_offset;$('#more-transactions').hidden=transactionOffset===null;
   if(reset&&!data.transactions.length)$('#transactions').append(el('p',{textContent:'この期間の取引はありません。'}));
 }
-async function refresh(){await Promise.all([summary(),activities(),transactions()]);const review=await api('review-count');$('#review-note').textContent=`移行時の要確認データ：${review.count}件。未対応の旧ログは収支に含めていません。`;}
+async function refresh(){await Promise.all([summary(),activities(),transactions()]);everyone.reload();}
 function bindForm(selector,path,build,after){
   const form=$(selector);let lastBody='',key=crypto.randomUUID();
   form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type=submit],button:not([type])');button.disabled=true;
@@ -156,10 +140,16 @@ $('#assign-form').onsubmit=async event=>{
 bindForm('#category-form','categories',value=>value,bootstrap);
 $('#transaction-form [name=kind]').onchange=txCategories;
 $('#locate').onclick=()=>{if(!navigator.geolocation){notify('現在地を取得できないブラウザです');return;}navigator.geolocation.getCurrentPosition(position=>{$('#activity-form [name=latitude]').value=position.coords.latitude;$('#activity-form [name=longitude]').value=position.coords.longitude;notify('現在地を入力しました');},()=>notify('現在地を取得できません。位置情報の許可を確認してください。'));};
-$('#publish-default').onchange=async event=>{const input=event.target;input.disabled=true;try{await api('settings',{publish_default:input.checked});notify(input.checked?'新しい記録は最初から公開になります':'新しい記録は最初は非公開になります');}catch(error){input.checked=!input.checked;notify(error.message);}finally{input.disabled=false;}};
-$('#map-visible').onchange=async event=>{const input=event.target;try{await api('settings',{map_visible:input.checked});notify(input.checked?'みんなの地図に表示します':'みんなの地図から隠しました');}catch(error){input.checked=!input.checked;notify(error.message);}};
-$('#publish-precision').onchange=async event=>{try{await api('settings',{publish_precision:event.target.value});notify('公開時の位置の出し方を保存しました');}catch(error){notify(error.message);}};
-$('#publish-delay').onchange=async event=>{try{await api('settings',{publish_delay_hours:Number(event.target.value)});notify('公開までの時間を保存しました');}catch(error){notify(error.message);}};
+$('#publish-default').onchange=async event=>{const input=event.target;input.disabled=true;try{await api('settings',{publish_default:input.checked});notify(input.checked?'新しい記録は最初からみんなに見せます':'新しい記録は最初は自分だけに見えます');}catch(error){input.checked=!input.checked;notify(error.message);}finally{input.disabled=false;}};
+// 旅モード: オンの間だけみんなの地図に出る。自動オフは日数で送り、サーバーが期限(map_visible_until)にする
+const travelBadge=el('span',{className:'travel-badge',textContent:'旅モード中',hidden:true});shell.count.before(travelBadge);
+function paintTravel(on,until){$('#map-visible').checked=on;$('#map-visible-label').textContent=on?'旅モード中':'旅モードオフ';travelBadge.hidden=!on;$('#map-visible-days').disabled=!on;if(!on||!until)$('#map-visible-days').value='0';
+  $('#map-visible-until').textContent=on&&until?new Date(until).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'})+' に自動でオフになります':'';}
+async function saveTravel(body,done){try{await api('settings',body);const data=await api('bootstrap');paintTravel(data.settings.map_visible,data.settings.map_visible_until);if(body.map_visible_days)$('#map-visible-days').value=String(body.map_visible_days);await everyone.reload();notify(done(data.settings));}catch(error){notify(error.message);const data=await api('bootstrap').catch(()=>null);if(data)paintTravel(data.settings.map_visible,data.settings.map_visible_until);}}
+$('#map-visible').onchange=event=>saveTravel(event.target.checked?{map_visible:true,map_visible_days:Number($('#map-visible-days').value)}:{map_visible:false},s=>s.map_visible?'旅モードをオンにしました。みんなの地図に表示されます':'旅モードをオフにしました。みんなの地図から隠れます');
+$('#map-visible-days').onchange=event=>saveTravel({map_visible_days:Number(event.target.value)},s=>s.map_visible_until?'自動でオフにする日時を保存しました':'手動でオフにするまで旅モードを続けます');
+$('#publish-precision').onchange=async event=>{try{await api('settings',{publish_precision:event.target.value});notify('位置の出し方を保存しました');}catch(error){notify(error.message);}};
+$('#publish-delay').onchange=async event=>{try{await api('settings',{publish_delay_hours:Number(event.target.value)});notify('見せるまでの時間を保存しました');}catch(error){notify(error.message);}};
 async function iconRequest(method,body){const response=await fetch('/api/private/icon',{method,headers:body?{'Content-Type':'image/png'}:{},body}),result=await response.json();if(!response.ok)throw new Error(result.error||'保存できませんでした');}
 // 正方形に中央クロップして256pxのPNGにする（canvas経由なのでEXIFは残らない）
 $('#icon-file').onchange=async event=>{const input=event.currentTarget,file=input.files[0];if(!file)return;try{const bitmap=await createImageBitmap(file,{imageOrientation:'from-image'}),side=Math.min(bitmap.width,bitmap.height),canvas=el('canvas',{width:256,height:256});canvas.getContext('2d').drawImage(bitmap,(bitmap.width-side)/2,(bitmap.height-side)/2,side,side,0,0,256,256);bitmap.close();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob||blob.size>512*1024)throw new Error('画像が大きすぎます');await iconRequest('POST',blob);await bootstrap();notify('アイコン画像を保存しました');}catch(error){notify(`アイコンを保存できません：${error.message}`);}finally{input.value='';}};
@@ -183,4 +173,16 @@ $('#share-form').onsubmit=async event=>{event.preventDefault();const form=event.
 $('#close-share').onclick=()=>$('#share-dialog').close();
 $('#month').value='';
 for(const input of document.querySelectorAll('[type=datetime-local]'))input.value=localNow();
+// タイムラインの絞り込みを自分の線にも反映する(ほかの人を選んだら自分の線は隠す)
+function drawOwn(){
+  const f=publicFilter,tripName=id=>trips.find(t=>t.id===id)?.name,jst=r=>new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
+  route.render(!f||!f.active?allRecords:f.person&&f.person!==me.handle?[]:allRecords.filter(r=>(!f.trip||tripName(r.trip_id)===f.trip)&&(!f.category||r.category_name===f.category)&&(!f.from||jst(r)>=f.from)&&(!f.to||jst(r)<=f.to)));
+}
+// 右上の自分のアイコン → 設定シート
+const face=el('button',{type:'button',className:'me-button'});face.setAttribute('aria-label','設定を開く');shell.stage.append(face);
+function paintFace(user){face.replaceChildren(whoMarker({image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name,color:'#356f68'}));}
+paintFace(me);face.onclick=()=>$('#settings-dialog').showModal();$('#close-settings').onclick=()=>$('#settings-dialog').close();
+$('#settings-dialog').addEventListener('click',event=>{if(event.target===event.currentTarget)event.currentTarget.close();});
 try{await bootstrap();await refresh();}catch(error){notify(error.message);}
+return {setFilter:f=>{publicFilter=f;drawOwn();},refresh};
+}

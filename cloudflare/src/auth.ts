@@ -2,8 +2,8 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
 export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null};
-// Only same-origin paths under /admin may be used as a post-login destination.
-export const safeNext = (value: string | null) => value && /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value) && !value.startsWith('//') ? value : '/admin/';
+// Only the map page (exactly "/") and same-origin paths under /admin may be used as a post-login destination.
+export const safeNext = (value: string | null) => value && (value === '/' || /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value)) ? value : '/';
 type AuthEnv = Pick<Env, 'DB' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>;
 
 const SESSION_COOKIE = 'tm_session', FLOW_COOKIE = 'tm_oauth';

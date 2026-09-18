@@ -14,7 +14,14 @@ async function localUser(env: Env): Promise<User> {
 export async function handle(request: Request, env: Env, localOwner = false): Promise<Response> {
   const url=new URL(request.url);
   try {
+    if (url.pathname === '/api/public/session' && request.method === 'GET') {
+      // Login state for the single map page. Only public profile fields; private data stays behind /api/private/*.
+      const who = localOwner ? await localUser(env) : await currentUser(request,env);
+      return secure(json({user: who ? {handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version == null ? null : `/api/public/icons/${who.handle}?v=${who.icon_version}`} : null}));
+    }
     if (url.pathname.startsWith('/api/public/')) return secure(await publicApi(request,env));
+    // The old owner page moved to the single map page at /.
+    if (['/admin','/admin/','/admin/index.html'].includes(url.pathname)) return secure(new Response(null,{status:302,headers:{Location:'/'}}));
     if (url.pathname === '/auth/google' && request.method === 'GET') return secure(await startGoogleLogin(request,env));
     if (url.pathname === '/auth/callback' && request.method === 'GET') return secure(await finishGoogleLogin(request,env));
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
@@ -36,7 +43,7 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     }
     if (!['GET','HEAD'].includes(request.method)) return secure(json({error:'Method not allowed'},405));
     const asset=await env.ASSETS.fetch(new Request(url,request));
-    const response=secure(asset, privatePath || url.pathname === '/vendor/maplibre-gl-worker.mjs');
+    const response=secure(asset, privatePath || ['/','/index.html','/vendor/maplibre-gl-worker.mjs'].includes(url.pathname));
     // App files change on every deploy; make browsers revalidate so phones never mix old and new code.
     if (!url.pathname.startsWith('/vendor/')) response.headers.set('Cache-Control','no-cache');
     return response;

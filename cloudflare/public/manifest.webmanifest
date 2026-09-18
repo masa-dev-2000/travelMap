@@ -16,6 +16,6 @@
   "shortcuts": [
     {"name": "記録をはじめる", "url": "/admin/start/"},
     {"name": "記録する", "url": "/admin/record/"},
-    {"name": "地図・一覧", "url": "/admin/"}
+    {"name": "地図・一覧", "url": "/"}
   ]
 }

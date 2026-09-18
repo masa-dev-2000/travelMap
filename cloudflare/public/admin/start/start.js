@@ -66,7 +66,7 @@ try{
   const activities=data.categories.filter(item=>item.active&&item.kind==='activity');
   categoryId=(activities.find(item=>item.name==='移動')??activities[0])?.id??null;
   publish=data.settings?.publish_default===true;
-  const visible=$('#visible'),paint=()=>{$('#visible-label').textContent=visible.checked?'地図に表示中':'地図に非表示';};
+  const visible=$('#visible'),paint=()=>{$('#visible-label').textContent=visible.checked?'旅モード中':'旅モードオフ';};
   visible.checked=data.settings?.map_visible===true;paint();
   visible.onchange=async()=>{paint();try{await api('settings',{map_visible:visible.checked});}catch(error){visible.checked=!visible.checked;paint();say(error.message);}};
   if(!categoryId)say('カテゴリがありません。設定で追加してください');

@@ -1,14 +1,4 @@
 export function el(tag, props={}) { return Object.assign(document.createElement(tag),props); }
-export function makeMap() {
-  const map=L.map('map').setView([35.5,134.5],6);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,referrerPolicy:'strict-origin-when-cross-origin',attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
-  return map;
-}
-export function pin(map, item, openRecord) {
-  const node=el('div'); node.append(el('strong',{textContent:item.place_name || item.observed_place_name || '記録した場所'}),el('p',{textContent:item.memo}));
-  if(openRecord){const button=el('button',{type:'button',textContent:'記録を開く'});button.onclick=()=>{map.closePopup();openRecord();};node.append(button);}
-  return L.circleMarker([item.latitude,item.longitude],{radius:4,weight:1.5,color:'#216453',fillOpacity:.8}).addTo(map).bindPopup(node);
-}
 // 現在地マーカー: アップロード画像 → 絵文字 → アバター画像 → 名前の頭文字。ユーザー入力は textContent だけで入れる
 export function whoMarker({image,icon,avatar,name,caption,color}){
   const node=el('div',{className:'who-marker'}),face=el('span',{className:'who-face'});if(color)node.style.setProperty('--c',color);

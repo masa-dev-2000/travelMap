@@ -46,22 +46,22 @@ const asUser2=async(path,body,method)=>{
 };
 const activity=(extra={})=>({category_id:'action',occurred_at:'2025-11-30T15:00:00Z',memo:'PRIVATE MEMO',latitude:35,longitude:134,...extra});
 
-test('vector map network access is limited to owner document and local map worker',async()=>{
-  for(const path of ['/admin/','/vendor/maplibre-gl-worker.mjs']){
+test('vector map network access is limited to the map page, owner documents and local map worker',async()=>{
+  for(const path of ['/','/admin/start/','/vendor/maplibre-gl-worker.mjs']){
     const policy=(await owner(path)).headers.get('Content-Security-Policy');
     assert.ok(policy.includes("connect-src 'self' https://tiles.openfreemap.org;"));
     assert.ok(policy.includes("script-src 'self';"));
     assert.ok(policy.includes("worker-src 'self';"));
     assert.ok(!policy.includes('unsafe-eval'));
   }
-  for(const path of ['/','/api/public/entries','/api/private/bootstrap']){
+  for(const path of ['/terms','/api/public/entries','/api/private/bootstrap']){
     assert.ok(!(await owner(path)).headers.get('Content-Security-Policy').includes('openfreemap.org'));
   }
 });
 
 test('production denies missing/forged JWT; local entry refuses non-loopback host',async()=>{
   assert.equal((await handle(request('/api/private/bootstrap'),env)).status,401);
-  const redirect=await handle(new Request('https://travel.test/admin/',{headers:{'Cf-Access-Jwt-Assertion':'forged'}}),env);
+  const redirect=await handle(new Request('https://travel.test/admin/start/',{headers:{'Cf-Access-Jwt-Assertion':'forged'}}),env);
   assert.equal(redirect.status,302);assert.equal(redirect.headers.get('Location'),'/auth/google');
   assert.equal((await handle(new Request('https://travel.test/api/private/bootstrap',{headers:{Cookie:'tm_session='+'f'.repeat(64)}}),env)).status,401);
   assert.equal((await local.fetch(request('/admin/'),env)).status,403);
@@ -173,7 +173,7 @@ test('Google id_token is verified for issuer, audience, nonce and verified email
   const fakeFetch=async()=>Response.json({id_token:idToken});
   const callback=new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}});
   const response=await finishGoogleLogin(callback,env,fakeFetch,key);
-  assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/admin/');
+  assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/');
   const cookie=response.headers.get('Set-Cookie');assert.ok(/tm_session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure/.test(cookie));
   const token=cookie.match(/tm_session=([a-f0-9]{64})/)[1];
   const me=await(await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:'tm_session='+token}}),env)).json();
@@ -260,9 +260,9 @@ test('logout requires same-origin POST and clears the session; deleting a migrat
   assert.equal(await env.DB.prepare('SELECT id FROM activities WHERE id=?').bind(legacy.id).first(),null);
 });
 
-test('login next only accepts /admin paths; profile settings validate handle and tip link; public profile exposes no email',async()=>{
+test('login next only accepts / and /admin paths; profile settings validate handle and tip link; public profile exposes no email',async()=>{
   const {safeNext}=await import('../src/auth.ts');
-  assert.equal(safeNext('/admin/record/'),'/admin/record/');assert.equal(safeNext('https://evil.test/'),'/admin/');assert.equal(safeNext('//evil.test'),'/admin/');assert.equal(safeNext('/api/private/me'),'/admin/');
+  assert.equal(safeNext('/admin/record/'),'/admin/record/');assert.equal(safeNext('/'),'/');assert.equal(safeNext('https://evil.test/'),'/');assert.equal(safeNext('//evil.test'),'/');assert.equal(safeNext('/api/private/me'),'/');assert.equal(safeNext('/\evil.test'),'/');assert.equal(safeNext(null),'/');
   assert.equal((await owner('/api/private/settings',{handle:'Bad Handle'})).status,400);
   assert.equal((await owner('/api/private/settings',{handle:'second'})).status,400);
   assert.equal((await owner('/api/private/settings',{tip_url:'http://insecure.example'})).status,400);
@@ -322,4 +322,30 @@ test('map icon image: PNG only, 512KB cap, served by handle, in the feed, and re
   assert.equal((await send(undefined,'','image/png','DELETE')).status,200);
   assert.equal((await handle(request(icon_url),env)).status,404);assert.equal((await handle(request('/api/public/icons/nobody'),env)).status,404);
   assert.equal((await(await handle(request('/api/public/entries?u=local'),env)).json()).entries[0].author_icon_url,null);
+});
+
+test('single map page: /admin/ redirects to /, session endpoint reports login state without private fields',async()=>{
+  for(const path of ['/admin','/admin/']){const moved=await handle(request(path),env);assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/');}
+  assert.equal((await handle(request('/'),env)).status,200);
+  const anonymous=await handle(request('/api/public/session'),env);
+  assert.deepEqual(await anonymous.json(),{user:null});assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
+  const mine=await(await asUser2('/api/public/session')).json();
+  assert.equal(mine.user.handle,'second');assert.ok(!JSON.stringify(mine).includes('example.com'));assert.ok(!('id' in mine.user));
+});
+test('travel mode auto-off: an elapsed map_visible_until hides the person everywhere; turning it on again clears it',async()=>{
+  const made=await(await owner('/api/private/activities',activity({memo:'AUTO OFF',publish:true}))).json();
+  const has=async()=>(await(await handle(request('/api/public/entries'),env)).json()).entries.some(e=>e.id===made.public_id);
+  const until=async()=>(await env.DB.prepare("SELECT value FROM user_settings WHERE user_id='local-owner' AND key='map_visible_until'").first())?.value;
+  assert.equal((await owner('/api/private/settings',{map_visible:true,map_visible_days:3})).status,200);
+  assert.ok(Math.abs(Date.parse(await until())-Date.now()-3*86400000)<60000);assert.equal(await has(),true);
+  let boot=await(await owner('/api/private/bootstrap')).json();assert.equal(boot.settings.map_visible,true);assert.equal(boot.settings.map_visible_until,await until());
+  await env.DB.prepare("UPDATE user_settings SET value=? WHERE user_id='local-owner' AND key='map_visible_until'").bind(new Date(Date.now()-1000).toISOString()).run();
+  assert.equal(await has(),false);
+  const handleName=(await(await owner('/api/private/bootstrap')).json()).user.handle;
+  assert.equal((await(await handle(request('/api/public/users/'+handleName),env)).json()).visible,0);
+  boot=await(await owner('/api/private/bootstrap')).json();assert.equal(boot.settings.map_visible,false);
+  assert.equal((await owner('/api/private/settings',{map_visible_days:-1})).status,400);
+  assert.equal((await owner('/api/private/settings',{map_visible:true})).status,200);
+  assert.equal(await until(),'');assert.equal(await has(),true);
+  assert.equal((await(await handle(request('/api/public/users/'+handleName),env)).json()).visible,1);
 });
