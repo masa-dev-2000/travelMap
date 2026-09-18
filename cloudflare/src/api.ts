@@ -68,7 +68,7 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
     const handle = url.searchParams.get('u'), now = new Date().toISOString();
     const entries = await query(env.DB, `SELECT p.id,p.date,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
-      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,
+      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
@@ -225,6 +225,12 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
       if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));
       if (body.bio !== undefined) writes.push(query(db,'UPDATE users SET bio=? WHERE id=?',[text(body.bio,'ひとこと',300,false),uid]));
+      if (body.icon !== undefined) {
+        if (body.icon !== null && typeof body.icon !== 'string') throw new InputError('アイコンが不正です');
+        const icon=(body.icon ?? '').trim();
+        if ([...icon].length>8 || [...new Intl.Segmenter('ja',{granularity:'grapheme'}).segment(icon)].length>2 || /[<>&"']/.test(icon)) throw new InputError('アイコンは絵文字1〜2文字です');
+        writes.push(query(db,'UPDATE users SET icon=? WHERE id=?',[icon || null,uid]));
+      }
       if (body.tip_url !== undefined) {
         const tip=optionalText(body.tip_url,'投げ銭リンク',500);
         if (tip && !/^https:\/\/[^\s]+$/.test(tip)) throw new InputError('投げ銭リンクは https:// で始まるURLです');

@@ -9,6 +9,13 @@ export function pin(map, item, openRecord) {
   if(openRecord){const button=el('button',{type:'button',textContent:'記録を開く'});button.onclick=()=>{map.closePopup();openRecord();};node.append(button);}
   return L.circleMarker([item.latitude,item.longitude],{radius:4,weight:1.5,color:'#216453',fillOpacity:.8}).addTo(map).bindPopup(node);
 }
+// 現在地マーカー: 絵文字 → アバター画像 → 名前の頭文字。ユーザー入力は textContent だけで入れる
+export function whoMarker({icon,avatar,name,caption,color}){
+  const node=el('div',{className:'who-marker'}),face=el('span',{className:'who-face'});if(color)node.style.setProperty('--c',color);
+  const initial=()=>{face.replaceChildren();face.textContent=[...(name||'?')][0].toUpperCase();};
+  if(icon){face.textContent=icon;face.classList.add('emoji');}else if(avatar){const img=el('img',{src:avatar,alt:'',referrerPolicy:'no-referrer'});img.onerror=initial;face.append(img);}else initial();
+  node.append(face);if(caption)node.append(el('span',{className:'who-caption',textContent:caption}));return node;
+}
 export const yen=value=>new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY'}).format(value);
 export async function api(path,body,key=crypto.randomUUID()) {
   const response=await fetch('/api/private/'+path,body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify(body)});

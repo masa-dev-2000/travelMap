@@ -6,7 +6,6 @@ export function mapShell(groups) {
   const mapNode=document.querySelector('#map'),message=document.querySelector('#message');
   const stage=el('main',{className:'map-stage'}),rail=el('nav',{className:'map-rail'});
   rail.setAttribute('aria-label','地図のメニュー');
-  const logo=el('span',{className:'rail-logo',textContent:'↗'});rail.append(logo);
   const heading=el('div',{className:'map-heading',textContent:'TravelMap'});
   const count=el('span',{id:'map-count',textContent:'読み込み中…'});heading.append(count);
   const drawer=el('aside',{className:'map-drawer',hidden:true});

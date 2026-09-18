@@ -1,15 +1,17 @@
-import {el} from './shared.js';
+import {el, whoMarker} from './shared.js';
 import {gl} from './owner-map.js';
 import {orderedRoute} from './route.js';
 const collection=features=>({type:'FeatureCollection',features});
 const point=r=>[r.longitude,r.latitude];
 const feature=(geometry,properties={})=>({type:'Feature',geometry,properties});
 export function makeOwnerRoute(map,shell){
-  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false;
+  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null;
   const badge=el('button',{className:'route-overview',type:'button',textContent:'全ルート',hidden:true});document.querySelector('.map-stage').append(badge);
   const popup=new gl.Popup({maxWidth:'280px'});
   function sources(){
-    const segments=rows.slice(1).map((r,i)=>feature({type:'LineString',coordinates:[point(rows[i]),point(r)]},{index:i}));
+    // 鮮度: 時刻と順番の平均。古い区間ほど透明で細く、新しい区間ほど不透明で太い
+    const first=Date.parse(rows[0]?.occurred_at),span=Math.max(1,Date.parse(rows.at(-1)?.occurred_at)-first),steps=Math.max(1,rows.length-2);
+    const segments=rows.slice(1).map((r,i)=>{const t=Math.min(1,Math.max(0,((Date.parse(r.occurred_at)-first)/span+i/steps)/2))||0;return feature({type:'LineString',coordinates:[point(rows[i]),point(r)]},{index:i,opacity:+(.15+.8*t).toFixed(3),width:+(1.5+2*t).toFixed(2)});});
     const records=rows.filter(r=>r.category_name!=='移動').map(r=>feature({type:'Point',coordinates:point(r)},{id:r.id}));
     const selected=index===null?[]:[segments[index]];
     const ends=index===null?[]:[rows[index],rows[index+1]].map(r=>feature({type:'Point',coordinates:point(r)}));
@@ -20,7 +22,7 @@ export function makeOwnerRoute(map,shell){
     for(const [id,data] of Object.entries(sources())){const key='travel-'+id;if(map.getSource(key))map.getSource(key).setData(data);else map.addSource(key,{type:'geojson',data});}
     const dark=document.body.dataset.basemap==='fiord',color=dark?'#8ed5c3':'#356f68';
     const layers=[
-      {id:'travel-line',type:'line',source:'travel-segments',paint:{'line-color':color,'line-width':2.5,'line-opacity':.8}},
+      {id:'travel-line',type:'line',source:'travel-segments',paint:{'line-color':color,'line-width':['get','width'],'line-opacity':['get','opacity']},layout:{'line-cap':'round'}},
       {id:'travel-hit',type:'line',source:'travel-segments',paint:{'line-width':16,'line-opacity':0}},
       {id:'travel-dots',type:'circle',source:'travel-records',minzoom:11,paint:{'circle-radius':4,'circle-color':color,'circle-stroke-color':'#fff','circle-stroke-width':1}},
       {id:'travel-selected',type:'line',source:'travel-selected',paint:{'line-color':'#ef893d','line-width':4}},
@@ -63,14 +65,16 @@ export function makeOwnerRoute(map,shell){
     else if(hits.length)select(Number(hits[0].properties.index));
   });
   map.on('mousemove',event=>{if(map.getLayer('travel-hit'))map.getCanvas().style.cursor=map.queryRenderedFeatures(event.point,{layers:['travel-dots','travel-hit']}).length?'pointer':'';});
-  function render(records){
-    rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;endpoints.forEach(m=>m.remove());endpoints=[];
+  function markers(){
+    endpoints.forEach(m=>m.remove());endpoints=[];
     if(rows.length)for(const [r,label,idx] of [[rows[0],'始点',0],[rows.at(-1),'最新',rows.length-2]]){
       if(rows.length===1&&label==='始点')continue;
-      const button=el('button',{type:'button',className:'vector-endpoint',textContent:label});button.title=label+' '+new Date(r.occurred_at).toLocaleString('ja-JP');button.onclick=()=>select(idx);
-      endpoints.push(new gl.Marker({element:button,anchor:label==='始点'?'right':'left'}).setLngLat(point(r)).addTo(map));
+      const latest=label==='最新',button=el('button',{type:'button',className:latest?'who-button':'vector-endpoint',textContent:latest?'':label});
+      if(latest)button.append(whoMarker({icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}),color:'#356f68'}));
+      button.title=label+' '+new Date(r.occurred_at).toLocaleString('ja-JP');button.onclick=()=>select(idx);
+      endpoints.push(new gl.Marker({element:button,anchor:latest?'top':'right',offset:latest?[0,-19]:[0,0]}).setLngLat(point(r)).addTo(map));
     }
-    draw();
   }
-  return {clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),points:()=>rows.map(point)};
+  function render(records){rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;markers();draw();}
+  return {setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),points:()=>rows.map(point)};
 }

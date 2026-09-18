@@ -2,13 +2,13 @@ import { currentUser, finishGoogleLogin, logout, startGoogleLogin, type User } f
 import { json, privateApi, publicApi } from './api.ts';
 import { InputError } from './validation.ts';
 
-const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_name: 'ローカル', handle: 'local', avatar_url: null, bio: '', tip_url: null};
+const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_name: 'ローカル', handle: 'local', avatar_url: null, icon: null, bio: '', tip_url: null};
 
 // Local development has no Google login; the local entry point vouches for a fixed account.
 async function localUser(env: Env): Promise<User> {
   await env.DB.prepare('INSERT OR IGNORE INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES(?,?,?,?,?,?,?)')
     .bind(LOCAL_USER.id, null, LOCAL_USER.email, LOCAL_USER.display_name, LOCAL_USER.handle, null, new Date().toISOString()).run();
-  return LOCAL_USER;
+  return await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,bio,tip_url FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
 }
 
 export async function handle(request: Request, env: Env, localOwner = false): Promise<Response> {

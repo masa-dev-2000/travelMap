@@ -44,3 +44,5 @@ CREATE INDEX IF NOT EXISTS transactions_user ON transactions(user_id,occurred_at
 CREATE INDEX IF NOT EXISTS public_entries_user ON public_entries(user_id,status);
 ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN tip_url TEXT;
+-- Map marker icon chosen by the user (emoji). NULL falls back to the Google avatar, then the initial.
+ALTER TABLE users ADD COLUMN icon TEXT;

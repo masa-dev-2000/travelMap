@@ -276,6 +276,17 @@ test('login next only accepts /admin paths; profile settings validate handle and
   await owner('/api/private/settings',{handle:'local'});
 });
 
+test('map icon accepts up to two emoji, rejects markup and long text, and reaches the public feed',async()=>{
+  for(const icon of ['<b>','abc','🚐🚐🚐',5,'a&'])assert.equal((await owner('/api/private/settings',{icon})).status,400);
+  assert.equal((await owner('/api/private/settings',{icon:'🚐'})).status,200);
+  assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon,'🚐');
+  await owner('/api/private/activities',activity({memo:'ICON',publish:true}));
+  const feed=await(await handle(request('/api/public/entries?u=local'),env)).json();
+  assert.ok(feed.entries.length&&feed.entries.every(e=>e.author_icon==='🚐'&&'author_avatar' in e));
+  assert.equal((await owner('/api/private/settings',{icon:''})).status,200);
+  assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon,null);
+});
+
 test('hidden mode removes a person from the shared map without unpublishing; visible mode brings them back',async()=>{
   const made=await(await owner('/api/private/activities',activity({memo:'ON TRIP',publish:true}))).json();
   const has=async()=>(await(await handle(request('/api/public/entries'),env)).json()).entries.some(e=>e.id===made.public_id);

@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
-export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; bio: string; tip_url: string | null};
+export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; bio: string; tip_url: string | null};
 // Only same-origin paths under /admin may be used as a post-login destination.
 export const safeNext = (value: string | null) => value && /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value) && !value.startsWith('//') ? value : '/admin/';
 type AuthEnv = Pick<Env, 'DB' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>;
@@ -33,7 +33,7 @@ export async function verifyAccessToken(token: string, env: Pick<Env, 'ACCESS_IS
 }
 
 export async function userById(db: D1Database, id: string): Promise<User | null> {
-  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,bio,tip_url FROM users WHERE id=?', [id]).first<User>();
+  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,icon,bio,tip_url FROM users WHERE id=?', [id]).first<User>();
 }
 
 // Resolves the signed-in user from the session cookie, or from a legacy Access assertion for the owner.
@@ -45,7 +45,7 @@ export async function currentUser(request: Request, env: AuthEnv): Promise<User 
   }
   const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
   if (assertion && await verifyAccessToken(assertion, env)) {
-    return await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,bio,tip_url FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();
+    return await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,bio,tip_url FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();
   }
   return null;
 }

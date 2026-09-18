@@ -1,4 +1,4 @@
-import {el, makeMap, pin, yen} from './shared.js';
+import {el, makeMap, pin, whoMarker, yen} from './shared.js';
 import {mapShell} from './map-shell.js';
 const status=document.querySelector('#message'), list=document.querySelector('#entries');
 const filters=el('div',{className:'filters'});
@@ -33,15 +33,15 @@ function draw(){
     if(!located.length)continue;
     const points=located.map(entry=>[entry.latitude,entry.longitude]);
     if(points.length>1){
-      L.polyline(points,{color:'#2a2a2a',weight:5,opacity:.15,interactive:false}).addTo(layers);
-      for(let index=1;index<points.length;index++)
-        L.polyline([points[index-1],points[index]],{color:shade((ratio(located[index-1])+ratio(located[index]))/2,author),weight:3,opacity:.95,lineCap:'round',interactive:false}).addTo(layers);
+      L.polyline(points,{color:'#2a2a2a',weight:5,opacity:.06,interactive:false}).addTo(layers);
+      for(let index=1;index<points.length;index++){const t=(ratio(located[index-1])+ratio(located[index]))/2;
+        L.polyline([points[index-1],points[index]],{color:shade(t,author),weight:2+2*t,opacity:.15+.8*t,lineCap:'round',interactive:false}).addTo(layers);}
     }
     const last=located.at(-1);
-    L.marker(points.at(-1),{icon:L.divIcon({className:'route-label',html:`<span style="border-color:hsl(${hueOf(author)} 70% 35%);color:hsl(${hueOf(author)} 70% 28%)">${last.author_name.replace(/[<>&]/g,'')} ${day(last.date)}</span>`,iconSize:null}),interactive:false,keyboard:false}).addTo(layers);
+    L.marker(points.at(-1),{icon:L.divIcon({className:'who-anchor',html:whoMarker({icon:last.author_icon,avatar:last.author_avatar,name:last.author_name,caption:last.author_name+' '+day(last.date),color:`hsl(${hueOf(author)} 70% 35%)`}),iconSize:null}),interactive:false,keyboard:false,zIndexOffset:1000}).addTo(layers);
     for(const entry of located){
       const marker=pin(map,entry,()=>{shell.open('records');document.getElementById('entry-'+entry.id)?.scrollIntoView({block:'start'});});
-      marker.setStyle({radius:5,weight:1,color:'#fff',fillColor:shade(ratio(entry),author),fillOpacity:1});
+      marker.setStyle({radius:5,weight:1,color:'#fff',fillColor:shade(ratio(entry),author),fillOpacity:.35+.65*ratio(entry),opacity:.35+.65*ratio(entry)});
       map.removeLayer(marker);pins.addLayer(marker);
     }
   }
