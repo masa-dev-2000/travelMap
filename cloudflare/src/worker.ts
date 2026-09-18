@@ -36,7 +36,7 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     if (['/auth/google','/auth/callback','/auth/continue'].includes(url.pathname) && request.method === 'GET') {
       // Login problems (including database errors) end on a guidance page, never on raw JSON.
       try { return secure(await (url.pathname === '/auth/google' ? startGoogleLogin(request,env) : url.pathname==='/auth/callback'?finishGoogleLogin(request,env):continueGoogleLogin(request,env))); }
-      catch { console.error(JSON.stringify({event:'login_failed',request_id:crypto.randomUUID()})); return secure(loginErrorPage(500,'いま混み合っているか、一時的に処理できませんでした。',request)); }
+      catch(error) { console.error(JSON.stringify({event:'login_failed',request_id:crypto.randomUUID(),error:error instanceof Error?error.name:'unknown'})); return secure(loginErrorPage(500,'いま混み合っているか、一時的に処理できませんでした。',request)); }
     }
     if (url.pathname === '/auth/logout' && request.method === 'POST') {
       if (request.headers.get('Origin') !== url.origin) return secure(json({error:'操作元を確認できません'},403));

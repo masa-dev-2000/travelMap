@@ -21,16 +21,16 @@ const secure = (url: URL) => url.protocol === 'https:';
 function setCookie(name: string, value: string, url: URL, maxAgeSeconds: number): string {
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure(url) ? '; Secure' : ''}`;
 }
-function sessionKey(value?:string):Uint8Array {
+async function sessionKey(value?:string):Promise<CryptoKey> {
   if(!value)throw new Error('SESSION_ENCRYPTION_KEY is not configured');
-  try { const bytes=Uint8Array.from(atob(value.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));if(bytes.length!==32)throw new Error();return bytes; }
+  try { const normalized=value.replace(/-/g,'+').replace(/_/g,'/'),padded=normalized.padEnd(Math.ceil(normalized.length/4)*4,'='),bytes=Uint8Array.from(atob(padded),c=>c.charCodeAt(0));if(bytes.length!==32)throw new Error();return await crypto.subtle.importKey('raw',bytes,{name:'AES-GCM'},false,['encrypt','decrypt']); }
   catch { throw new Error('SESSION_ENCRYPTION_KEY must be a base64url-encoded 32-byte key'); }
 }
 export async function encryptIdentity(identity:AuthIdentity,secret:string,now=new Date()):Promise<string>{
-  return new EncryptJWT(identity).setProtectedHeader({alg:'dir',enc:'A256GCM',typ:'JWT'}).setIssuer('travelmap').setAudience('travelmap-session').setIssuedAt(Math.floor(now.getTime()/1000)).setExpirationTime(Math.floor(now.getTime()/1000)+SESSION_DAYS*86400).encrypt(sessionKey(secret));
+  return new EncryptJWT(identity).setProtectedHeader({alg:'dir',enc:'A256GCM',typ:'JWT'}).setIssuer('travelmap').setAudience('travelmap-session').setIssuedAt(Math.floor(now.getTime()/1000)).setExpirationTime(Math.floor(now.getTime()/1000)+SESSION_DAYS*86400).encrypt(await sessionKey(secret));
 }
 export async function decryptIdentity(token:string,secret?:string):Promise<AuthIdentity|null>{
-  try { const {payload}=await jwtDecrypt(token,sessionKey(secret),{issuer:'travelmap',audience:'travelmap-session',keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM']});
+  try { const {payload}=await jwtDecrypt(token,await sessionKey(secret),{issuer:'travelmap',audience:'travelmap-session',keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM']});
     if(typeof payload.sub!=='string'||typeof payload.email!=='string')return null;
     return {sub:payload.sub,email:payload.email,...(typeof payload.name==='string'?{name:payload.name}:{}),...(typeof payload.picture==='string'?{picture:payload.picture}:{})};
   } catch { return null; }
