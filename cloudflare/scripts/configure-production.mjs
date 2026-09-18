@@ -1,0 +1,15 @@
+import {readFile,writeFile} from 'node:fs/promises';
+import {parseArgs} from 'node:util';
+const {values}=parseArgs({options:Object.fromEntries(['account-id','database-id','bucket','issuer','aud','owner-email','google-client-id'].map(key=>[key,{type:'string'}]))});
+const fail=message=>{throw new Error(message);};
+if(!/^[a-f0-9]{32}$/.test(values['account-id']||'') || /^0+$/.test(values['account-id']))fail('A confirmed Cloudflare account ID is required.');
+if(!/^[a-f0-9-]{36}$/.test(values['database-id']||'') || /^0+-0+-0+-0+-0+$/.test(values['database-id']))fail('A created D1 database ID is required.');
+if(!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(values.bucket||''))fail('A private R2 bucket name is required.');
+if(!/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(values.issuer||'') || !values.aud || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values['owner-email']||''))fail('Access issuer, audience and owner email are required.');
+const root=new URL('../',import.meta.url),config=JSON.parse(await readFile(new URL('wrangler.jsonc',root),'utf8'));
+config.name='travelmap';config.main='src/worker.ts';config.account_id=values['account-id'];config.workers_dev=true;
+config.d1_databases=[{binding:'DB',database_name:'travelmap',database_id:values['database-id']}];
+config.r2_buckets=[{binding:'FILES',bucket_name:values.bucket}];
+config.vars={ACCESS_ISSUER:values.issuer,ACCESS_AUD:values.aud,OWNER_EMAIL:values['owner-email'],GOOGLE_CLIENT_ID:values['google-client-id']??''};
+await writeFile(new URL('wrangler.production.jsonc',root),JSON.stringify(config,null,2)+'\n',{flag:'wx'});
+console.log('Created production configuration. No cloud resources were changed.');

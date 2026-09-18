@@ -1,0 +1,15 @@
+import {readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+const root=new URL('../',import.meta.url),configPath=new URL('wrangler.production.jsonc',root);
+const config=JSON.parse(await readFile(configPath,'utf8'));
+if(config.main!=='src/worker.ts' || !/^[a-f0-9]{32}$/.test(config.account_id) || /^0+$/.test(config.account_id))throw new Error('Production account and entry point must be pinned.');
+if(!config.vars.ACCESS_ISSUER || !config.vars.ACCESS_AUD || !config.vars.OWNER_EMAIL || config.preview_urls!==false)throw new Error('Access configuration must be complete and preview URLs disabled.');
+for(const name of ['CLOUDFLARE_API_TOKEN','CLOUDFLARE_API_KEY','CLOUDFLARE_EMAIL','CLOUDFLARE_ACCOUNT_ID'])if(process.env[name])throw new Error(`${name} overrides project authentication; use a clean terminal environment.`);
+const args=process.argv.slice(2);
+if(args.some(arg=>/^(--config|-c|--profile|--env|-e|--cwd|--env-file)(=|$)/.test(arg)))throw new Error('Configuration and authentication overrides are not allowed.');
+const allowed=['whoami','deploy','d1','r2','types','versions','rollback','secret'];
+if(!allowed.includes(args[0]))throw new Error('Unsupported command.');
+const result=spawnSync(process.execPath,[fileURLToPath(new URL('node_modules/wrangler/bin/wrangler.js',root)),...args,'--config',fileURLToPath(configPath),'--profile','travelmap'],{cwd:fileURLToPath(root),stdio:'inherit',shell:false});
+if(result.error)throw result.error;
+process.exit(result.status??1);

@@ -1,0 +1,46 @@
+-- Public map coordinates are explicitly selected snapshots, never a join to private locations.
+CREATE TABLE IF NOT EXISTS public_entry_locations (
+ entry_id TEXT PRIMARY KEY REFERENCES public_entries(id) ON DELETE CASCADE,
+ latitude REAL NOT NULL CHECK(latitude BETWEEN -90 AND 90),
+ longitude REAL NOT NULL CHECK(longitude BETWEEN -180 AND 180)
+) STRICT;
+-- Original attachments remain private in R2; published copies use separate keys.
+CREATE TABLE IF NOT EXISTS public_photo_objects (
+ id TEXT PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES public_entries(id) ON DELETE CASCADE,
+ object_key TEXT NOT NULL UNIQUE, sha256 TEXT NOT NULL, caption TEXT NOT NULL DEFAULT ''
+) STRICT;
+CREATE TABLE IF NOT EXISTS request_receipts (
+ id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, response_json TEXT NOT NULL
+) STRICT;
+-- Owner preferences, e.g. whether new records start as published.
+CREATE TABLE IF NOT EXISTS app_settings (
+ key TEXT PRIMARY KEY, value TEXT NOT NULL
+) STRICT;
+-- Accounts (Google login) and browser sessions. Session ids are stored hashed.
+CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY, google_sub TEXT UNIQUE, email TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+ handle TEXT NOT NULL UNIQUE, avatar_url TEXT, created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS sessions (
+ id_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ created_at TEXT NOT NULL, expires_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS user_settings (
+ user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, key TEXT NOT NULL, value TEXT NOT NULL,
+ PRIMARY KEY(user_id,key)
+) STRICT;
+-- Ownership. Added without REFERENCES because SQLite cannot add a NOT NULL foreign key column with a default; the app enforces it.
+ALTER TABLE activities ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE transactions ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE trips ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE categories ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE attachments ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE public_entries ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+-- Publication granularity: exact coordinates, city name only, or no location. publish_at delays visibility.
+ALTER TABLE public_entries ADD COLUMN precision TEXT NOT NULL DEFAULT 'exact' CHECK(precision IN ('exact','city','hidden'));
+ALTER TABLE public_entries ADD COLUMN publish_at TEXT;
+CREATE INDEX IF NOT EXISTS activities_user ON activities(user_id,occurred_at);
+CREATE INDEX IF NOT EXISTS transactions_user ON transactions(user_id,occurred_at);
+CREATE INDEX IF NOT EXISTS public_entries_user ON public_entries(user_id,status);
+ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN tip_url TEXT;

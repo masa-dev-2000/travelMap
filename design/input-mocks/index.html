@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TravelMap 入力比較</title><link rel="stylesheet" href="style.css"><script defer src="app.js"></script></head>
+<body>
+<header><a href="./">TravelMap <small>入力モック</small></a><span>実データには保存しません</span></header>
+<nav class="variants" aria-label="比較する案"><button data-mode="a" aria-pressed="true">A · 3ステップ</button><button data-mode="b" aria-pressed="false">B · 1項目ずつ</button></nav>
+<main><section class="sheet" aria-label="記録を入力"><div class="sheet-head"><div><p id="counter"></p><h1 id="title"></h1></div><button id="reset" class="quiet">最初から</button></div><div class="progress" aria-hidden="true"><span id="progress"></span></div><form id="form" novalidate><div id="fields"></div><p id="error" role="alert"></p><footer><button id="back" type="button" class="quiet">戻る</button><button id="skip" type="button" class="quiet">スキップ</button><button id="next" type="submit" class="primary">次へ →</button></footer></form><section id="done" hidden><div class="check">✓</div><h2>記録できました</h2><p>モック内での保存体験です。</p><dl id="result"></dl><button id="again" class="primary">もう1件記録する</button></section></section><p class="caption" id="caption"></p></main>
+</body></html>

@@ -1,7 +1,8 @@
 {
   "scripts": {
     "lint": "eslint \"travelMap/**/*.js\" \"inputTravelLog/**/*.js\" \"migration.js\"",
-    "test": "npm run lint"
+    "test": "npm run lint",
+    "test:model": "python -m unittest discover -s data_model -v"
   },
   "dependencies": {
     "firebase-admin": "^13.6.0"

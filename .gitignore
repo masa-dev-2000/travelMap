@@ -7,3 +7,14 @@ serviceAccountKey.json
 *~
 *.swp
 *.un~
+
+# Private model data must stay outside hosting directories and Git.
+__pycache__/
+*.sqlite*
+/model-output/
+.wrangler/
+.dev.vars*
+.env*
+/cloudflare/build/
+/cloudflare/wrangler.production.jsonc
+/cloudflare/public/vendor/
