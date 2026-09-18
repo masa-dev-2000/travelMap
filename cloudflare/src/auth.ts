@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, EncryptJWT, jwtDecrypt, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
 export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null; terms_accepted_at?: string | null};
@@ -27,11 +27,16 @@ async function sessionKey(value?:string):Promise<CryptoKey> {
   catch { throw new Error('SESSION_ENCRYPTION_KEY must be a base64url-encoded 32-byte key'); }
 }
 export async function encryptIdentity(identity:AuthIdentity,secret:string,now=new Date()):Promise<string>{
-  return new EncryptJWT(identity).setProtectedHeader({alg:'dir',enc:'A256GCM',typ:'JWT'}).setIssuer('travelmap').setAudience('travelmap-session').setIssuedAt(Math.floor(now.getTime()/1000)).setExpirationTime(Math.floor(now.getTime()/1000)+SESSION_DAYS*86400).encrypt(await sessionKey(secret));
+  const iv=crypto.getRandomValues(new Uint8Array(12)),issued=Math.floor(now.getTime()/1000),plain=new TextEncoder().encode(JSON.stringify({...identity,iss:'travelmap',aud:'travelmap-session',iat:issued,exp:issued+SESSION_DAYS*86400}));
+  const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode('travelmap-session-v1')},await sessionKey(secret),plain);
+  return `v1.${base64url(iv)}.${base64url(encrypted)}`;
 }
 export async function decryptIdentity(token:string,secret?:string):Promise<AuthIdentity|null>{
-  try { const {payload}=await jwtDecrypt(token,await sessionKey(secret),{issuer:'travelmap',audience:'travelmap-session',keyManagementAlgorithms:['dir'],contentEncryptionAlgorithms:['A256GCM']});
-    if(typeof payload.sub!=='string'||typeof payload.email!=='string')return null;
+  try { const [version,ivText,dataText,...rest]=token.split('.');if(version!=='v1'||!ivText||!dataText||rest.length)return null;
+    const decode=(value:string)=>{const normalized=value.replace(/-/g,'+').replace(/_/g,'/'),padded=normalized.padEnd(Math.ceil(normalized.length/4)*4,'=');return Uint8Array.from(atob(padded),c=>c.charCodeAt(0));};
+    const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:decode(ivText),additionalData:new TextEncoder().encode('travelmap-session-v1')},await sessionKey(secret),decode(dataText));
+    const payload=JSON.parse(new TextDecoder().decode(plain)) as Record<string,unknown>;
+    if(payload.iss!=='travelmap'||payload.aud!=='travelmap-session'||typeof payload.exp!=='number'||payload.exp<=Date.now()/1000||typeof payload.sub!=='string'||typeof payload.email!=='string')return null;
     return {sub:payload.sub,email:payload.email,...(typeof payload.name==='string'?{name:payload.name}:{}),...(typeof payload.picture==='string'?{picture:payload.picture}:{})};
   } catch { return null; }
 }
