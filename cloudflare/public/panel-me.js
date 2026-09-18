@@ -1,6 +1,6 @@
 import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
 // ログイン中だけ読み込む: 自分の記録一覧・編集・公開設定、収支、旅と分類、記録フォーム、設定シート。私的データは /api/private/* からだけ取る
-export async function startMe({shell,map,route,everyone,fitRecords,notify,me}){
+export async function startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip}){
 const $=selector=>document.querySelector(selector);
 let categories=[], trips=[], activityOffset=null, transactionOffset=null;
 let activityGeneration=0,allRecords=[],publicFilter=everyone.filter(),recordsLoaded=false;
@@ -19,7 +19,7 @@ async function bootstrap(){
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');
   fillSelect($('#activity-form [name=category_id]'),categories.filter(c=>c.active&&c.kind==='activity'));
   fillSelect($('#activity-form [name=expense_category]'),categories.filter(c=>c.active&&c.kind==='expense'));
-  txCategories();
+  txCategories();renderTrips();
 }
 async function summary(){
   const result=await api('summary?'+filter()), node=$('#summary');node.replaceChildren();
@@ -30,7 +30,7 @@ async function summary(){
 async function activities(reset=true){
   const generation=++activityGeneration;
   route.clear();
-  if(reset){$('#activities').replaceChildren();activityOffset=0;}
+  if(reset){$('#activities').replaceChildren();activityOffset=0;entryNodes.clear();}
   let count=0,located=0;const routeRecords=[];
   shell.count.textContent='記録を読み込み中…';
   do {
@@ -41,7 +41,7 @@ async function activities(reset=true){
   for(const item of data.activities){
     count++;
     const entry=el('details',{className:'card'}),preview=el('summary',{className:'record-preview'}),card=el('div',{className:'record-content'}), actions=el('div',{className:'card-actions'});
-    preview.append(el('time',{textContent:(item.public_status==='published'?'':'🔒 ')+new Date(item.occurred_at).toLocaleString('ja-JP')}),el('strong',{textContent:item.observed_place_name||item.category_name}),el('p',{textContent:item.memo}));entry.append(preview,card);
+    preview.append(el('time',{textContent:(item.public_status==='published'?'':'🔒 ')+new Date(item.occurred_at).toLocaleString('ja-JP')}),el('strong',{textContent:item.observed_place_name||item.category_name}),el('p',{textContent:item.memo}));entry.append(preview,card);entryNodes.set(item.id,entry);entry.addEventListener('click',event=>{if(!picking)return;event.preventDefault();event.stopPropagation();pick(item);},true);
     const badgeText=item.public_status==='published'?(item.publish_at&&item.publish_at>new Date().toISOString()?'公開予約':'公開中')+({city:'・場所名のみ',hidden:'・位置なし'}[item.public_precision]??''):'非公開';
     card.append(el('p',{className:'eyebrow',textContent:new Date(item.occurred_at).toLocaleString('ja-JP')}),el('h2',{textContent:item.observed_place_name || item.category_name}),el('p',{className:'memo',textContent:item.memo}),el('span',{className:'badge',textContent:badgeText}));
     if(item.spent_jpy!=null)card.append(el('p',{className:'spent',textContent:yen(item.spent_jpy)}));
@@ -61,7 +61,7 @@ async function activities(reset=true){
   activityOffset=data.next_offset;$('#more-activities').hidden=true;
   shell.count.textContent=`${count}件${activityOffset!==null?' 読み込み中…':` · 地図${located}件`}`;
   } while(activityOffset!==null);
-  allRecords=routeRecords;recordsLoaded=true;drawOwn();
+  allRecords=routeRecords;recordsLoaded=true;drawOwn();gaps();paintRange();
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
@@ -175,6 +175,58 @@ $('#share-form').onsubmit=async event=>{event.preventDefault();const form=event.
 $('#close-share').onclick=()=>$('#share-dialog').close();
 $('#month').value='';
 for(const input of document.querySelectorAll('[type=datetime-local]'))input.value=localNow();
+// 旅をまとめる: 記録一覧で「始まり」と「終わり」をタップすると、その間の記録がすべて選ばれる。名前を付けて旅にする
+const entryNodes=new Map(),tripBox=el('div',{id:'trip-cards'}),rangeStart=el('button',{type:'button',className:'range-start',textContent:'旅をまとめる'}),rangeBar=el('form',{className:'range-bar',hidden:true});
+const rangeInfo=el('p',{className:'range-info'}),rangeName=el('input',{maxLength:200,required:true,placeholder:'旅の名前'}),rangeSave=el('button',{className:'primary',textContent:'この範囲を旅にする'}),rangeCancel=el('button',{type:'button',textContent:'やめる'});
+rangeName.setAttribute('aria-label','旅の名前');rangeInfo.setAttribute('role','status');rangeBar.append(rangeInfo,rangeName,rangeSave,rangeCancel);$('#activities').before(tripBox,rangeStart,rangeBar);
+let picking=false,pickA=null,pickB=null,nameTouched=false;
+const jstDate=r=>new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}),shortDate=text=>{const [y,m,d]=text.split('-').map(Number);return `${y}/${m}/${d}`;};
+function rangeItems(){if(!pickA)return [];const a=Date.parse(pickA.occurred_at),b=Date.parse((pickB||pickA).occurred_at),lo=Math.min(a,b),hi=Math.max(a,b);return allRecords.filter(r=>{const t=Date.parse(r.occurred_at);return t>=lo&&t<=hi;}).sort((x,y)=>Date.parse(x.occurred_at)-Date.parse(y.occurred_at));}
+// 名前の案: 「2025年4月 山陰」のように、始まりの年月＋いちばん多い場所名
+function suggestName(items){const [y,m]=jstDate(items[0]).split('-').map(Number),counts=new Map();for(const r of items)if(r.observed_place_name)counts.set(r.observed_place_name,(counts.get(r.observed_place_name)||0)+1);const top=[...counts].sort((a,b)=>b[1]-a[1])[0]?.[0];return `${y}年${m}月${top?' '+top:' の旅'}`;}
+function paintRange(){
+  const items=picking?rangeItems():[],ids=new Set(items.map(r=>r.id));
+  for(const [id,node] of entryNodes){node.classList.toggle('in-range',ids.has(id));node.classList.toggle('range-end',picking&&(id===pickA?.id||id===pickB?.id));}
+  $('#activities').classList.toggle('picking',picking);rangeStart.hidden=picking;rangeBar.hidden=!picking;
+  if(!picking){route.highlight([]);return;}
+  route.highlight(items);
+  if(!items.length){rangeInfo.textContent='始まりの記録をタップしてください';rangeName.hidden=rangeSave.hidden=true;return;}
+  const spent=items.reduce((sum,r)=>sum+(r.spent_jpy??0),0),moving=items.filter(r=>r.trip_id),from=[...new Set(moving.map(r=>trips.find(t=>t.id===r.trip_id)?.name||'別の旅'))];
+  rangeInfo.textContent=`${items.length}件 · ${shortDate(jstDate(items[0]))}〜${shortDate(jstDate(items.at(-1)))} · 支出 ${yen(spent)}`+(pickB?'':'　つぎに終わりの記録をタップ');
+  rangeName.hidden=rangeSave.hidden=false;if(!nameTouched)rangeName.value=suggestName(items);
+  rangeSave.textContent=moving.length?`${moving.length}件を『${from.join('』『')}』から移して旅にする`:'この範囲を旅にする';
+}
+function pick(item){if(!pickA||pickB){pickA=item;pickB=null;}else pickB=item;paintRange();}
+function stopPicking(){picking=false;pickA=pickB=null;nameTouched=false;rangeName.value='';paintRange();}
+rangeStart.onclick=async()=>{if($('#trip-filter').value){$('#trip-filter').value='';await refresh().catch(error=>notify(error.message));}picking=true;pickA=pickB=null;paintRange();};rangeCancel.onclick=stopPicking;rangeName.oninput=()=>{nameTouched=true;};
+rangeBar.onsubmit=async event=>{event.preventDefault();if(!pickA)return;rangeSave.disabled=true;
+  try{const name=rangeName.value.trim(),result=await api('trips/assign-range',{name,from_activity_id:pickA.id,to_activity_id:(pickB||pickA).id});stopPicking();await bootstrap();await refresh();notify(`${result.assigned}件を「${name}」にまとめました`);}
+  catch(error){notify(error.message);}finally{rangeSave.disabled=false;}};
+// 記録の間が24時間以上あいている所に、薄い区切りを出す(提案だけ。タップすると、そこを始まりにして範囲を選べる)
+function gaps(){
+  for(const node of $('#activities').querySelectorAll('.gap-split'))node.remove();
+  if($('#trip-filter').value)return;// 旅で絞っている間は、間の記録が見えていないので区切りを出さない
+  for(let i=1;i<allRecords.length;i++){const newer=allRecords[i-1],older=allRecords[i],hours=(Date.parse(newer.occurred_at)-Date.parse(older.occurred_at))/3600000;if(hours<24)continue;
+    const split=el('button',{type:'button',className:'gap-split',textContent:`ここで区切る？（${hours<48?Math.round(hours)+'時間':Math.round(hours/24)+'日'}あき）`});split.onclick=()=>{picking=true;pickA=newer;pickB=null;nameTouched=false;paintRange();};entryNodes.get(older.id)?.before(split);}
+}
+// 旅の一覧: 名前・期間・件数・支出。再生、名前の変更、解除(旅は残す／旅ごと消す。記録そのものは消えない)
+function renderTrips(){
+  tripBox.replaceChildren();if(!trips.length)return;tripBox.append(el('h2',{textContent:'旅'}));
+  for(const trip of trips){
+    const card=el('details',{className:'trip-card'}),head=el('summary'),days=trip.first_at?`${shortDate(jstDate({occurred_at:trip.first_at}))}〜${shortDate(jstDate({occurred_at:trip.last_at}))}`:trip.starts_on?`${shortDate(trip.starts_on)}〜${trip.ends_on?shortDate(trip.ends_on):''}`:'';
+    head.append(el('strong',{textContent:trip.name}),el('span',{textContent:[days,`${trip.entries??0}件`,trip.spent_jpy!=null?'支出 '+yen(trip.spent_jpy):''].filter(Boolean).join(' · ')}));card.append(head);
+    const actions=el('div',{className:'card-actions'});
+    if(playTrip&&trip.entries){const play=el('button',{type:'button',className:'primary',textContent:'▶ 旅を再生'});play.onclick=()=>playTrip(trip);actions.append(play);}
+    const show=el('button',{type:'button',textContent:'この旅の記録だけ表示'});show.onclick=()=>{$('#trip-filter').value=trip.id;refresh().catch(error=>notify(error.message));};actions.append(show);card.append(actions);
+    const form=el('form',{className:'row'}),name=el('input',{value:trip.name,maxLength:200,required:true}),save=el('button',{textContent:'名前を変更'});name.setAttribute('aria-label','旅の名前');form.append(name,save);
+    form.onsubmit=async event=>{event.preventDefault();save.disabled=true;try{await api(`trips/${trip.id}`,{name:name.value.trim()});await bootstrap();everyone.reload();notify('旅の名前を変更しました');}catch(error){notify(error.message);}finally{save.disabled=false;}};card.append(form);
+    const armed=(button,label,confirmText,run)=>{button.onclick=async()=>{if(button.dataset.armed!=='1'){button.dataset.armed='1';button.textContent=confirmText;setTimeout(()=>{button.dataset.armed='';button.textContent=label;},5000);return;}button.disabled=true;try{await run();}catch(error){notify(error.message);button.disabled=false;}};return button;};
+    const undo=el('div',{className:'card-actions'});
+    undo.append(armed(el('button',{type:'button',textContent:'記録の紐づけを外す'}),'記録の紐づけを外す',`もう一度押すと${trip.entries??0}件を旅から外します（旅と記録は残ります）`,async()=>{const result=await api(`trips/${trip.id}/release`,{});if($('#trip-filter').value===trip.id)$('#trip-filter').value='';await bootstrap();await refresh();notify(`${result.released}件を旅から外しました`);}),
+      armed(el('button',{type:'button',textContent:'旅を削除'}),'旅を削除','もう一度押すと旅を削除します（記録は残ります）',async()=>{await api(`trips/${trip.id}/release`,{delete:true});if($('#trip-filter').value===trip.id)$('#trip-filter').value='';await bootstrap();await refresh();notify('旅を削除しました。記録は残っています');}));
+    card.append(undo);tripBox.append(card);
+  }
+}
 // タイムラインの絞り込みを自分の線にも反映する(ほかの人を選んだら自分の線は隠す)
 function drawOwn(){
   const f=publicFilter,tripName=id=>trips.find(t=>t.id===id)?.name,jst=r=>new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
