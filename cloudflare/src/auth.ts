@@ -1,9 +1,9 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
-export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null};
-// Only the map page (exactly "/") and same-origin paths under /admin may be used as a post-login destination.
-export const safeNext = (value: string | null) => value && (value === '/' || /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value)) ? value : '/';
+export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null; terms_accepted_at?: string | null};
+// Only the map page (exactly "/"), the sign-up page and same-origin paths under /admin may be used as a post-login destination.
+export const safeNext = (value: string | null) => value && (value === '/' || value === '/signup/' || /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value)) ? value : '/';
 type AuthEnv = Pick<Env, 'DB' | 'GOOGLE_CLIENT_ID' | 'GOOGLE_CLIENT_SECRET' | 'ACCESS_ISSUER' | 'ACCESS_AUD' | 'OWNER_EMAIL'>;
 
 const SESSION_COOKIE = 'tm_session', FLOW_COOKIE = 'tm_oauth';
@@ -33,7 +33,7 @@ export async function verifyAccessToken(token: string, env: Pick<Env, 'ACCESS_IS
 }
 
 export async function userById(db: D1Database, id: string): Promise<User | null> {
-  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at FROM users WHERE id=?', [id]).first<User>();
+  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE id=?', [id]).first<User>();
 }
 
 // Resolves the signed-in user from the session cookie, or from a legacy Access assertion for the owner.
@@ -45,7 +45,7 @@ export async function currentUser(request: Request, env: AuthEnv): Promise<User 
   }
   const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
   if (assertion && await verifyAccessToken(assertion, env)) {
-    return await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();
+    return await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();
   }
   return null;
 }
@@ -90,9 +90,27 @@ export async function verifyGoogleIdToken(token: string, clientId: string, nonce
   } catch { return null; }
 }
 
+// Guidance pages for login problems. Plain HTML without scripts, so they render even inside in-app browsers; all dynamic text is escaped.
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+const PAGE_STYLE = `:root{font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:#16362d;color:#f3efe6}main{width:100%;max-width:420px}h1{margin:0 0 12px;font-size:24px}p{margin:0 0 12px;line-height:1.7;font-size:15px}.muted{color:#a9c2b8;font-size:13px}a.btn{display:block;margin-top:12px;padding:15px;border-radius:16px;text-align:center;text-decoration:none;font-weight:700;font-size:16px}a.main{background:#e0a24a;color:#1d2a24}a.sub{border:1px solid #ffffff55;color:#f3efe6}input{width:100%;height:46px;padding:0 12px;border:1px solid #ffffff44;border-radius:12px;background:#ffffff14;color:#f3efe6;font-size:15px}`;
+function page(status: number, title: string, body: string, headers: Record<string, string> = {}): Response {
+  return new Response(`<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escapeHtml(title)} | TravelMap</title><style>${PAGE_STYLE}</style></head><body><main><h1>${escapeHtml(title)}</h1>${body}</main></body></html>`,
+    {status, headers: {'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...headers}});
+}
+const IN_APP_BROWSER = /Line\/|Instagram|FBAN|FBAV|FB_IAB|Twitter|MicroMessenger|; wv\)/;
+const IN_APP_NOTE = '<p class="muted">LINEやInstagramなどのアプリ内ブラウザでは、Googleがログインを受け付けないことがあります。Safari / Chrome で開いてください。</p>';
+export function loginErrorPage(status: number, detail: string, request: Request, headers: Record<string, string> = {}): Response {
+  return page(status, 'ログインできませんでした', `<p>${escapeHtml(detail)}</p><p>時間をおいてもう一度お試しください。</p>${IN_APP_BROWSER.test(request.headers.get('User-Agent') ?? '') ? IN_APP_NOTE : ''}<a class="btn main" href="/auth/google">もう一度ログインする</a><a class="btn sub" href="/">地図に戻る</a>`, headers);
+}
+
 export async function startGoogleLogin(request: Request, env: AuthEnv): Promise<Response> {
   const url = new URL(request.url);
-  if (!env.GOOGLE_CLIENT_ID) return Response.json({error: 'ログインが設定されていません'}, {status: 503});
+  if (!env.GOOGLE_CLIENT_ID) return loginErrorPage(503, 'ログインが設定されていません。', request);
+  // Google refuses OAuth inside embedded web views (disallowed_useragent). Explain first instead of sending people into that error.
+  if (IN_APP_BROWSER.test(request.headers.get('User-Agent') ?? '') && url.searchParams.get('continue') !== '1') {
+    const next = safeNext(url.searchParams.get('next'));
+    return page(200, 'ブラウザで開いてください', `<p>アプリ内ブラウザではログインできない場合があります。Safari / Chrome で開いてください。</p><p class="muted">下のURLを長押しでコピーして、Safari / Chrome に貼り付けてください。</p><input readonly aria-label="このサイトのURL" value="${escapeHtml(url.origin + '/')}"><a class="btn sub" href="/auth/google?next=${encodeURIComponent(next)}&amp;continue=1">このまま続ける</a><a class="btn sub" href="/">地図に戻る</a>`);
+  }
   const state = randomToken(), nonce = randomToken(), verifier = randomToken();
   const challenge = base64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   const params = new URLSearchParams({
@@ -109,21 +127,23 @@ export async function finishGoogleLogin(request: Request, env: AuthEnv, fetchTok
   const url = new URL(request.url), code = url.searchParams.get('code'), state = url.searchParams.get('state');
   const flow = cookies(request)[FLOW_COOKIE]?.split('.') ?? [];
   const clearFlow = setCookie(FLOW_COOKIE, '', url, 0);
-  const fail = (message: string) => new Response(message, {status: 400, headers: {'Set-Cookie': clearFlow, 'Content-Type': 'text/plain; charset=utf-8'}});
-  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail('ログインが設定されていません');
-  if (!code || !state || flow.length < 3 || flow[0] !== state) return fail('ログインをやり直してください');
+  const fail = (message: string) => loginErrorPage(400, message, request, {'Set-Cookie': clearFlow});
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail('ログインが設定されていません。');
+  if (url.searchParams.get('error')) return fail('Googleでのログインが完了しませんでした。');
+  if (!code || !state || flow.length < 3 || flow[0] !== state) return fail('ログインの手続きが途中で切れました。');
   const [, nonce, verifier, next] = flow;
   const tokenResponse = await fetchToken('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: new URLSearchParams({code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: `${url.origin}/auth/callback`, grant_type: 'authorization_code', code_verifier: verifier}),
   });
-  if (!tokenResponse.ok) return fail('Googleでの確認に失敗しました');
+  if (!tokenResponse.ok) return fail('Googleでの確認に失敗しました。');
   const tokens = await tokenResponse.json() as {id_token?: string};
   const claims = tokens.id_token ? await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID, nonce, key) : null;
-  if (!claims) return fail('Googleアカウントを確認できませんでした');
+  if (!claims) return fail('Googleアカウントを確認できませんでした。');
   const user = await upsertGoogleUser(env.DB, claims);
   const session = await createSession(env.DB, user.id);
-  const headers = new Headers({Location: safeNext(decodeURIComponent(next ?? ''))});
+  // First login: nothing is usable until the terms are accepted on the sign-up page.
+  const headers = new Headers({Location: user.terms_accepted_at ? safeNext(decodeURIComponent(next ?? '')) : '/signup/'});
   headers.append('Set-Cookie', clearFlow);
   headers.append('Set-Cookie', setCookie(SESSION_COOKIE, session, url, SESSION_DAYS * 86400));
   return new Response(null, {status: 302, headers});

@@ -66,3 +66,6 @@ CREATE INDEX IF NOT EXISTS transactions_activity ON transactions(activity_id);
 CREATE INDEX IF NOT EXISTS public_photo_objects_entry ON public_photo_objects(entry_id);
 CREATE INDEX IF NOT EXISTS activities_trip ON activities(trip_id);
 CREATE INDEX IF NOT EXISTS footprints_viewer ON footprints(viewer_id,day);
+-- Sign-up: NULL terms_accepted_at = the account has not accepted the terms yet and can only use the sign-up page. onboarded_at = first profile setup finished.
+ALTER TABLE users ADD COLUMN terms_accepted_at TEXT;
+ALTER TABLE users ADD COLUMN onboarded_at TEXT;

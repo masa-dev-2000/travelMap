@@ -10,16 +10,23 @@ export function whoMarker({image,icon,avatar,name,caption,status,color}){
   node.append(face);if(caption)node.append(el('span',{className:'who-caption',textContent:caption}));if(status)node.append(el('span',{className:'who-status',textContent:status}));return node;
 }
 export const yen=value=>new Intl.NumberFormat('ja-JP',{style:'currency',currency:'JPY'}).format(value);
+// サーバ側の不調(500台。D1の上限など)は、原因を問わず同じ案内にする。JSONでない応答でも落ちない
+async function readResult(response){
+  let result={};try{result=await response.json();}catch{}
+  if(response.status>=500)result={error:'混み合っています。少し時間をおいてください'};
+  return result;
+}
 export async function api(path,body,key=crypto.randomUUID()) {
   const response=await fetch('/api/private/'+path,body === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify(body)});
-  const result=await response.json();
+  const result=await readResult(response);
+  if (response.status===403&&result.signup){location.href=result.signup;throw new Error(result.error);}
   if (response.status===401&&result.login){location.href=result.login+'?next='+encodeURIComponent(location.pathname+location.search);throw new Error('ログインが必要です');}
   if (!response.ok) throw new Error(result.error || '保存できませんでした');
   return result;
 }
 export async function apiDelete(path) {
   const response=await fetch('/api/private/'+path,{method:'DELETE'});
-  const result=await response.json();
+  const result=await readResult(response);
   if (!response.ok) throw new Error(result.error || '削除できませんでした');
   return result;
 }

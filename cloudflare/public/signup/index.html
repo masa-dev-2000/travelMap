@@ -1,0 +1,22 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#16362d"><meta name="robots" content="noindex"><link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><title>はじめる | TravelMap</title><link rel="stylesheet" href="/signup/signup.css"><script type="module" src="/signup/signup.js"></script></head>
+<body><header><strong>TravelMap</strong><ol id="dots" aria-label="登録の進み具合"><li class="on">同意</li><li>プロフィール</li><li>見せ方</li></ol></header>
+<main>
+<section id="step-1"><h1>はじめる前に</h1>
+<ul class="points"><li>記録するとき、<b>位置と時刻</b>を保存します。</li><li><b>「旅モード」をオンにした間だけ</b>、公開にした記録がみんなの地図に出ます。</li><li>公開したあとに<b>他の人が保存した内容は取り消せません</b>。</li></ul>
+<p class="link"><a href="/terms" target="_blank" rel="noopener">利用規約とプライバシーポリシーを読む</a></p>
+<label class="check"><input id="accept" type="checkbox"><span>利用規約とプライバシーポリシーに同意する</span></label>
+<div class="actions"><button id="agree" class="primary" type="button" disabled>同意して進む</button><button id="decline" class="ghost" type="button">同意しない</button></div></section>
+<section id="step-2" hidden><h1>プロフィール</h1>
+<div class="icon-row"><span id="face" class="face" aria-hidden="true"></span><div class="icon-tools"><label class="file">画像を選ぶ<input id="icon-file" type="file" accept="image/*"></label><input id="emoji" maxlength="8" placeholder="絵文字でも可 🚐" aria-label="アイコンの絵文字（1〜2文字）" autocomplete="off"></div></div>
+<label>表示名<input id="display-name" maxlength="100" required autocomplete="nickname"></label>
+<label>ハンドル（英小文字・数字・ハイフン）<input id="handle" maxlength="24" autocapitalize="none" autocomplete="off" spellcheck="false"></label>
+<p class="hint">地図に出る名前とアイコンです。あとで設定から変えられます。</p>
+<div class="actions"><button id="to-3" class="primary" type="button">次へ</button><button class="ghost back" data-to="1" type="button">戻る</button></div></section>
+<section id="step-3" hidden><h1>見せ方</h1>
+<label class="switch-row"><input id="map-visible" type="checkbox"><span class="switch" aria-hidden="true"></span><span><b>旅モード</b><small>旅に出たらオンにしてください。オンの間だけ地図に出ます。</small></span></label>
+<label class="switch-row"><input id="publish-default" type="checkbox"><span class="switch" aria-hidden="true"></span><span><b>新しい記録をみんなに見せる</b><small>オフなら、自分だけの記録になります。</small></span></label>
+<label>位置の出し方<select id="publish-precision"><option value="exact">そのまま（地図に点）</option><option value="city">場所名だけ（点は出さない）</option><option value="hidden">場所も位置も出さない</option></select></label>
+<p class="hint">どれも、あとで設定から変えられます。</p><p class="hint phone-only">スマホでは「記録をはじめる」画面（<a href="/admin/start/">/admin/start/</a>）からワンタップで記録できます。</p>
+<div class="actions"><button id="finish" class="primary" type="button">はじめる</button><button class="ghost back" data-to="2" type="button">戻る</button></div></section>
+<p id="message" role="alert" aria-live="assertive"></p>
+</main></body></html>

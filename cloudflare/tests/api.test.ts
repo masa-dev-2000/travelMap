@@ -28,7 +28,7 @@ print(json.dumps(result))
   const DB=await mf.getD1Database('DB');
   for(const sql of statements)await DB.prepare(sql).run();
   const now=new Date().toISOString();
-  await DB.batch([['local-owner','local@localhost','local'],['u2','second@example.com','second']].map(([id,email,handle])=>DB.prepare('INSERT INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES(?,?,?,?,?,?,?)').bind(id,null,email,handle,handle,null,now)));
+  await DB.batch([['local-owner','local@localhost','local'],['u2','second@example.com','second']].map(([id,email,handle])=>DB.prepare('INSERT INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at,terms_accepted_at,onboarded_at) VALUES(?,?,?,?,?,?,?,?,?)').bind(id,null,email,handle,handle,null,now,now,now)));
   await DB.batch(['action:activity','cost:expense','salary:income'].map(pair=>{const [id,kind]=pair.split(':');return DB.prepare('INSERT INTO categories(id,kind,name,user_id) VALUES(?,?,?,?)').bind(id,kind,id,'local-owner');}));
   await DB.prepare("INSERT INTO categories(id,kind,name,user_id) VALUES('u2-action','activity','u2','u2')").run();
   await DB.prepare("INSERT INTO user_settings VALUES('local-owner','map_visible','true'),('u2','map_visible','true')").run();
@@ -173,7 +173,7 @@ test('Google id_token is verified for issuer, audience, nonce and verified email
   const fakeFetch=async()=>Response.json({id_token:idToken});
   const callback=new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}});
   const response=await finishGoogleLogin(callback,env,fakeFetch,key);
-  assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/');
+  assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/signup/');
   const cookie=response.headers.get('Set-Cookie');assert.ok(/tm_session=[a-f0-9]{64}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+; Secure/.test(cookie));
   const token=cookie.match(/tm_session=([a-f0-9]{64})/)[1];
   const me=await(await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:'tm_session='+token}}),env)).json();
@@ -348,7 +348,7 @@ test('single map page: /admin/ redirects to /, session endpoint reports login st
   for(const path of ['/admin','/admin/']){const moved=await handle(request(path),env);assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/');}
   assert.equal((await handle(request('/'),env)).status,200);
   const anonymous=await handle(request('/api/public/session'),env);
-  assert.deepEqual(await anonymous.json(),{user:null});assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
+  assert.deepEqual(await anonymous.json(),{needs_signup:false,user:null});assert.equal(anonymous.headers.get('Cache-Control'),'no-store');
   const mine=await(await asUser2('/api/public/session')).json();
   assert.equal(mine.user.handle,'second');assert.ok(!JSON.stringify(mine).includes('example.com'));assert.ok(!('id' in mine.user));
 });
@@ -437,4 +437,110 @@ test('assign-range groups the records between two own records (ends included), m
   assert.ok(await env.DB.prepare('SELECT id FROM trips WHERE id=?').bind(made.trip_id).first());
   assert.equal((await(await owner(`/api/private/trips/${made.trip_id}/release`,{delete:true})).json()).deleted,true);
   assert.equal(await env.DB.prepare('SELECT id FROM trips WHERE id=?').bind(made.trip_id).first(),null);
+});
+
+test('sign-up: first Google login lands on /signup/, nothing works before the terms are accepted, signup saves profile and creates categories',async()=>{
+  const keys=await generateKeyPair('RS256'),jwk=await exportJWK(keys.publicKey);jwk.kid='g';const key=createLocalJWKSet({keys:[jwk]});
+  const login=async(sub,email,cookieNext='')=>{
+    const idToken=await new SignJWT({email,email_verified:true,nonce:'n1',name:'Signup Person'}).setProtectedHeader({alg:'RS256',kid:'g'}).setSubject(sub).setIssuer('https://accounts.google.com').setAudience('client-id').setIssuedAt().setExpirationTime('5m').sign(keys.privateKey);
+    const response=await finishGoogleLogin(new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'+cookieNext}}),env,async()=>Response.json({id_token:idToken}),key);
+    return {response,cookie:'tm_session='+response.headers.get('Set-Cookie').match(/tm_session=([a-f0-9]{64})/)[1]};
+  };
+  const as=(cookie,path,body)=>handle(new Request('https://travel.test'+path,body===undefined?{headers:{Cookie:cookie}}:{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://travel.test','Idempotency-Key':crypto.randomUUID(),Cookie:cookie},body:JSON.stringify(body)}),env);
+  const {response,cookie}=await login('sub-signup','signup@example.com','.%2Fadmin%2Frecord%2F');
+  assert.equal(response.status,302);assert.equal(response.headers.get('Location'),'/signup/');
+  const uid=(await env.DB.prepare("SELECT id FROM users WHERE email='signup@example.com'").first()).id;
+  // pages: the map and the record screens send the account to /signup/; the sign-up page itself is served
+  for(const path of ['/','/admin/start/','/admin/record/']){const moved=await as(cookie,path);assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/signup/');}
+  assert.equal((await as(cookie,'/signup/')).status,200);assert.equal((await as(cookie,'/signup/signup.js')).status,200);
+  const anonymous=await handle(request('/signup/'),env);assert.equal(anonymous.status,302);assert.equal(anonymous.headers.get('Location'),'/auth/google?next=%2Fsignup%2F');
+  assert.equal((await(await as(cookie,'/api/public/session')).json()).needs_signup,true);
+  // API: only me, bootstrap (without creating categories), signup and cancel are open
+  const blocked=await as(cookie,'/api/private/activities',{category_id:'x',occurred_at:'2025-11-30T15:00:00Z'});
+  assert.equal(blocked.status,403);assert.deepEqual(await blocked.json(),{error:'利用規約への同意が必要です',signup:'/signup/'});
+  assert.equal((await as(cookie,'/api/private/settings',{map_visible:true})).status,403);
+  assert.equal((await as(cookie,'/api/private/activities')).status,403);
+  assert.equal((await handle(new Request('https://travel.test/api/private/icon',{method:'POST',headers:{Origin:'https://travel.test','Content-Type':'image/png',Cookie:cookie},body:'x'}),env)).status,403);
+  assert.equal((await as(cookie,'/api/private/me')).status,200);
+  const boot=await(await as(cookie,'/api/private/bootstrap')).json();assert.deepEqual(boot.categories,[]);assert.equal(boot.user.display_name,'Signup Person');
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) n FROM categories WHERE user_id=?').bind(uid).first()).n,0);
+  // an unaccepted account never reaches the public feed, even with travel mode and a published entry forced into the database
+  await env.DB.batch([env.DB.prepare("INSERT INTO user_settings VALUES(?,'map_visible','true')").bind(uid),env.DB.prepare("INSERT INTO categories(id,kind,name,user_id) VALUES('su-cat','activity','x',?)").bind(uid),
+    env.DB.prepare("INSERT INTO activities(id,occurred_at,timezone,timezone_basis,category_id,memo,user_id) VALUES('su-act','2025-01-01T00:00:00Z','Asia/Tokyo','recorded','su-cat','UNACCEPTED',?)").bind(uid),
+    env.DB.prepare("INSERT INTO public_entries(id,activity_id,date,memo,status,user_id) VALUES('su-pub','su-act','2025-01-01','UNACCEPTED','published',?)").bind(uid)]);
+  assert.ok(!JSON.stringify(await(await handle(request('/api/public/entries'),env)).json()).includes('UNACCEPTED'));
+  // cancel is refused while records exist
+  assert.equal((await as(cookie,'/api/private/signup/cancel',{})).status,400);
+  assert.ok(await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(uid).first());
+  await env.DB.batch(["DELETE FROM public_entries WHERE id='su-pub'","DELETE FROM activities WHERE id='su-act'","DELETE FROM categories WHERE id='su-cat'"].map(sql=>env.DB.prepare(sql)));
+  await env.DB.prepare("DELETE FROM user_settings WHERE user_id=?").bind(uid).run();
+  // signup: accept is required, handle errors come back as 400, success unlocks everything
+  assert.equal((await as(cookie,'/api/private/signup',{display_name:'さいん',handle:'signup-one'})).status,400);
+  assert.equal((await as(cookie,'/api/private/signup',{accept:'yes',display_name:'さいん',handle:'signup-one'})).status,400);
+  const taken=await as(cookie,'/api/private/signup',{accept:true,display_name:'さいん',handle:'second'});assert.equal(taken.status,400);assert.equal((await taken.json()).error,'そのハンドルは使われています');
+  assert.equal((await as(cookie,'/api/private/signup',{accept:true,display_name:'さいん',handle:'Bad Handle'})).status,400);
+  assert.equal((await env.DB.prepare('SELECT terms_accepted_at FROM users WHERE id=?').bind(uid).first()).terms_accepted_at,null);
+  const done=await as(cookie,'/api/private/signup',{accept:true,display_name:'さいん',handle:'signup-one',icon:'🚐',map_visible:false,publish_default:true,publish_precision:'city',bio:'IGNORED'});
+  assert.equal(done.status,200);assert.match(done.headers.get('Content-Type'),/charset=utf-8/);
+  const row=await env.DB.prepare('SELECT display_name,handle,icon,bio,terms_accepted_at,onboarded_at FROM users WHERE id=?').bind(uid).first();
+  assert.deepEqual([row.display_name,row.handle,row.icon,row.bio],['さいん','signup-one','🚐','']);assert.ok(row.terms_accepted_at&&row.onboarded_at);
+  const after=await(await as(cookie,'/api/private/bootstrap')).json();
+  assert.ok(after.categories.length>5);assert.deepEqual([after.settings.map_visible,after.settings.publish_default,after.settings.publish_precision],[false,true,'city']);
+  const category=after.categories.find(c=>c.kind==='activity').id;
+  assert.equal((await as(cookie,'/api/private/activities',{category_id:category,occurred_at:'2025-11-30T15:00:00Z',memo:'FIRST'})).status,201);
+  assert.equal((await(await as(cookie,'/api/public/session')).json()).needs_signup,false);
+  assert.equal((await as(cookie,'/')).status,200);
+  const back=await as(cookie,'/signup/');assert.equal(back.status,302);assert.equal(back.headers.get('Location'),'/');
+  // a finished account cannot be removed through cancel, and the next login goes to the requested page again
+  assert.equal((await as(cookie,'/api/private/signup/cancel',{})).status,400);
+  assert.equal((await login('sub-signup','signup@example.com','.%2Fadmin%2Frecord%2F')).response.headers.get('Location'),'/admin/record/');
+
+  // declining: an empty, unaccepted account and its sessions are removed
+  const second=await login('sub-decline','decline@example.com');
+  const gone=await as(second.cookie,'/api/private/signup/cancel',{});assert.equal(gone.status,200);assert.match(gone.headers.get('Set-Cookie'),/tm_session=; .*Max-Age=0/);
+  assert.equal(await env.DB.prepare("SELECT id FROM users WHERE email='decline@example.com'").first(),null);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) n FROM sessions WHERE user_id NOT IN (SELECT id FROM users)").first()).n,0);
+  assert.equal((await as(second.cookie,'/api/private/me')).status,401);
+});
+
+test('existing accounts and the local owner are unaffected by sign-up; safeNext allows /signup/',async()=>{
+  const {safeNext}=await import('../src/auth.ts');
+  assert.equal(safeNext('/signup/'),'/signup/');assert.equal(safeNext('/signup/x'),'/');assert.equal(safeNext('/signup'),'/');
+  assert.equal((await asUser2('/api/private/activities')).status,200);
+  assert.equal((await(await asUser2('/api/public/session')).json()).needs_signup,false);
+  assert.equal((await owner('/api/private/activities')).status,200);
+  assert.equal((await(await handle(request('/api/public/session'),env,true)).json()).needs_signup,false);
+  assert.deepEqual(await(await handle(request('/api/public/session'),env)).json(),{needs_signup:false,user:null});
+  const moved=await owner('/signup/');assert.equal(moved.status,302);assert.equal(moved.headers.get('Location'),'/');
+  assert.equal((await owner('/signup/?preview=1')).status,200);
+  const noPreview=await asUser2('/signup/?preview=1');assert.equal(noPreview.status,302);assert.equal(noPreview.headers.get('Location'),'/');
+  assert.equal((await owner('/api/private/signup/cancel',{})).status,400);
+  assert.ok(await env.DB.prepare("SELECT id FROM users WHERE id='local-owner'").first());
+});
+
+test('errors are readable: JSON carries charset=utf-8, login failures are HTML guidance pages, in-app browsers get a notice instead of Google',async()=>{
+  for(const response of [await handle(request('/api/private/bootstrap'),env),await owner('/api/private/settings',{handle:'Bad Handle'}),await handle(request('/api/public/entries'),env),await handle(request('/api/public/users/nobody'),env)])
+    assert.equal(response.headers.get('Content-Type'),'application/json; charset=utf-8');
+  const failed=await handle(new Request('https://travel.test/auth/callback?code=abc&state=WRONG',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}}),env);
+  assert.equal(failed.status,400);assert.equal(failed.headers.get('Content-Type'),'text/html; charset=utf-8');
+  const html=await failed.text();for(const part of ['ログインできませんでした','時間をおいてもう一度お試しください','href="/auth/google"','href="/"'])assert.ok(html.includes(part));
+  assert.ok(!html.includes('<script'));assert.ok(failed.headers.get('Content-Security-Policy').includes("script-src 'self'"));
+  const denied=await handle(request('/auth/callback?error=access_denied'),env);assert.equal(denied.status,400);assert.match(denied.headers.get('Content-Type'),/^text\/html/);
+  const unset=await handle(request('/auth/google'),{...env,GOOGLE_CLIENT_ID:''});assert.equal(unset.status,503);assert.match(unset.headers.get('Content-Type'),/^text\/html; charset=utf-8/);
+  // normal browsers go straight to Google; LINE / Instagram / Facebook web views see the notice unless they choose to continue
+  const normal=await handle(request('/auth/google?next=%2Fsignup%2F'),env);assert.equal(normal.status,302);assert.ok(normal.headers.get('Location').startsWith('https://accounts.google.com/'));assert.ok(normal.headers.get('Set-Cookie').includes(encodeURIComponent('/signup/')));
+  for(const agent of ['Mozilla/5.0 (iPhone) Safari Line/13.1.0','Mozilla/5.0 (iPhone) Instagram 300.0','Mozilla/5.0 [FBAN/FBIOS;FBAV/400.0]']){
+    const notice=await handle(new Request('https://travel.test/auth/google?next=%2Fsignup%2F',{headers:{'User-Agent':agent}}),env);
+    assert.equal(notice.status,200);assert.equal(notice.headers.get('Content-Type'),'text/html; charset=utf-8');assert.equal(notice.headers.get('Set-Cookie'),null);
+    const text=await notice.text();for(const part of ['アプリ内ブラウザではログインできない場合があります','Safari / Chrome','https://travel.test/','/auth/google?next=%2Fsignup%2F&amp;continue=1'])assert.ok(text.includes(part));
+    const onward=await handle(new Request('https://travel.test/auth/google?next=%2Fsignup%2F&continue=1',{headers:{'User-Agent':agent}}),env);assert.equal(onward.status,302);
+  }
+});
+test('a database failure during login ends on the 500 guidance page',async()=>{
+  const broken={...env,DB:{prepare(){throw new Error('D1_ERROR: too many reads');}}};
+  const original=globalThis.fetch;globalThis.fetch=async()=>{throw new Error('network down');};
+  try{
+    const crashed=await handle(new Request('https://travel.test/auth/callback?code=abc&state=s1',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}}),broken);
+    assert.equal(crashed.status,500);assert.equal(crashed.headers.get('Content-Type'),'text/html; charset=utf-8');assert.ok((await crashed.text()).includes('ログインできませんでした'));
+  }finally{globalThis.fetch=original;}
 });

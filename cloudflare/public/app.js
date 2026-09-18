@@ -9,6 +9,7 @@ import {makeStory} from '/story.js';
 const $=selector=>document.querySelector(selector),message=$('#message');
 let session={user:null};
 try{const response=await fetch('/api/public/session',{cache:'no-store'});if(response.ok)session=await response.json();}catch{}
+if(session.needs_signup)location.replace('/signup/');// 同意前のアカウント(通常はサーバが先に転送する)
 const me=session.user;
 for(const dialog of document.querySelectorAll('dialog'))document.body.append(dialog);
 const peopleNode=el('div',{className:'people'}),timelineNode=el('div');
@@ -21,7 +22,7 @@ if(me)groups.push(
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){location.href='/admin/start/';return true;}return false;}},
 );
 const shell=mapShell(groups);
-if(!me){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'ログイン'}));shell.fit.after(login);}
+if(!me){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.title='Googleアカウントで登録できます';login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'はじめる'}),el('span',{textContent:'/ ログイン'}),el('span',{className:'rail-note',textContent:'Googleアカウントで登録できます'}));shell.fit.after(login);}
 const map=makeOwnerMap();
 shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの開閉で地図の幅が変わる。続く fit が新しい幅で計算されるよう、その場で合わせる
 const route=makeOwnerRoute(map,shell);

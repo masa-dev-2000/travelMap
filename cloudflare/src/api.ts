@@ -1,7 +1,8 @@
 import { coordinates, date, dateTime, InputError, integer, optionalText, readBytes, readInput, scope, sha256, text, type Input } from './validation.ts';
 import { cleanPng } from './png.ts';
 
-export const json = (value: unknown, status = 200) => Response.json(value, {status, headers: {'Cache-Control':'no-store'}});
+// charset is explicit: some in-app browsers show a raw JSON error as mojibake without it.
+export const json = (value: unknown, status = 200, headers: Record<string,string> = {}) => new Response(JSON.stringify(value), {status, headers: {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store',...headers}});
 const query = (db: D1Database, sql: string, values: (string | number | null)[] = []) => db.prepare(sql).bind(...values);
 const id = () => crypto.randomUUID();
 
@@ -60,8 +61,8 @@ async function saveOnce(request: Request, db: D1Database, uid: string, body: Inp
   return json(result, 201);
 }
 
-// Travel mode: map_visible is on and the optional auto-off time (map_visible_until) has not passed. Binds one ISO timestamp.
-const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?))`;
+// Travel mode: the account finished sign-up (terms accepted), map_visible is on and the optional auto-off time (map_visible_until) has not passed. Binds one ISO timestamp.
+const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?) AND EXISTS (SELECT 1 FROM users tu WHERE tu.id=${owner} AND tu.terms_accepted_at IS NOT NULL))`;
 
 export async function publicApi(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -121,12 +122,51 @@ async function ensureCategories(db: D1Database, uid: string): Promise<void> {
   await db.batch(DEFAULT_CATEGORIES.map(([kind,name],index) => query(db,'INSERT INTO categories(id,kind,name,sort_order,user_id) VALUES(?,?,?,?,?)',[id(),kind,name,index,uid])));
 }
 
+// Validates profile and visibility fields and returns the writes; shared by the settings sheet and sign-up.
+async function settingsWrites(db: D1Database, uid: string, body: Input): Promise<D1PreparedStatement[]> {
+  const writes: D1PreparedStatement[]=[];
+  const put=(key:string,value:string)=>writes.push(query(db,'INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[uid,key,value]));
+  if (body.publish_default !== undefined) { if (typeof body.publish_default !== 'boolean') throw new InputError('公開の初期値が不正です'); put('publish_default',String(body.publish_default)); }
+  if (body.map_visible !== undefined) { if (typeof body.map_visible !== 'boolean') throw new InputError('旅モードが不正です'); put('map_visible',String(body.map_visible)); if (body.map_visible_days === undefined) put('map_visible_until',''); }
+  // Auto-off: 0 = until switched off by hand, otherwise travel mode ends that many days from now.
+  if (body.map_visible_days !== undefined) { const days=integer(body.map_visible_days,'自動オフまでの日数',365); put('map_visible_until',days ? new Date(Date.now()+days*86400000).toISOString() : ''); }
+  if (body.publish_precision !== undefined) { const value=text(body.publish_precision,'公開の粒度',10); if (!['exact','city','hidden'].includes(value)) throw new InputError('公開の粒度が不正です'); put('publish_precision',value); }
+  if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
+  if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));
+  if (body.status !== undefined) {
+    // Status line: one line, up to 40 characters. Empty clears it. Rendered with textContent only, so markup characters are allowed.
+    if (body.status !== null && typeof body.status !== 'string') throw new InputError('ステータスを確認してください');
+    const status=(body.status ?? '').trim();
+    if ([...status].length>40 || /[\r\n]/.test(status)) throw new InputError('ステータスは改行なしの40文字以内です');
+    writes.push(query(db,'UPDATE users SET status=?,status_at=? WHERE id=?',[status || null,status ? new Date().toISOString() : null,uid]));
+  }
+  if (body.bio !== undefined) writes.push(query(db,'UPDATE users SET bio=? WHERE id=?',[text(body.bio,'ひとこと',300,false),uid]));
+  if (body.icon !== undefined) {
+    if (body.icon !== null && typeof body.icon !== 'string') throw new InputError('アイコンが不正です');
+    const icon=(body.icon ?? '').trim();
+    if ([...icon].length>8 || [...new Intl.Segmenter('ja',{granularity:'grapheme'}).segment(icon)].length>2 || /[<>&"']/.test(icon)) throw new InputError('アイコンは絵文字1〜2文字です');
+    writes.push(query(db,'UPDATE users SET icon=? WHERE id=?',[icon || null,uid]));
+  }
+  if (body.tip_url !== undefined) {
+    const tip=optionalText(body.tip_url,'投げ銭リンク',500);
+    if (tip && !/^https:\/\/[^\s]+$/.test(tip)) throw new InputError('投げ銭リンクは https:// で始まるURLです');
+    writes.push(query(db,'UPDATE users SET tip_url=? WHERE id=?',[tip,uid]));
+  }
+  if (body.handle !== undefined) {
+    const handle=text(body.handle,'ハンドル',24);
+    if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(handle)) throw new InputError('ハンドルは英小文字・数字・ハイフンで2〜24文字です');
+    if (await query(db,'SELECT id FROM users WHERE handle=? AND id<>?',[handle,uid]).first()) throw new InputError('そのハンドルは使われています');
+    writes.push(query(db,'UPDATE users SET handle=? WHERE id=?',[handle,uid]));
+  }
+  return writes;
+}
+
 export async function privateApi(request: Request, env: Env, user: User): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, db = env.DB, uid = user.id;
   if (request.method === 'GET') {
     if (path === '/api/private/me') return json({user});
     if (path === '/api/private/bootstrap') {
-      await ensureCategories(db,uid);
+      if (user.terms_accepted_at) await ensureCategories(db,uid);// not before sign-up: an account that declines the terms must stay empty
       const [categories, trips, settings] = await Promise.all([
         query(db,'SELECT id,kind,name,color,active FROM categories WHERE user_id=? ORDER BY sort_order,id',[uid]).all(),
         query(db,`SELECT t.*,(SELECT COUNT(*) FROM activities a WHERE a.trip_id=t.id) entries,(SELECT MIN(a.occurred_at) FROM activities a WHERE a.trip_id=t.id) first_at,(SELECT MAX(a.occurred_at) FROM activities a WHERE a.trip_id=t.id) last_at,
@@ -313,43 +353,28 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       return json({saved:true});
     }
     if (path === '/api/private/settings') {
-      const writes: D1PreparedStatement[]=[];
-      const put=(key:string,value:string)=>writes.push(query(db,'INSERT INTO user_settings(user_id,key,value) VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value',[uid,key,value]));
-      if (body.publish_default !== undefined) { if (typeof body.publish_default !== 'boolean') throw new InputError('公開の初期値が不正です'); put('publish_default',String(body.publish_default)); }
-      if (body.map_visible !== undefined) { if (typeof body.map_visible !== 'boolean') throw new InputError('旅モードが不正です'); put('map_visible',String(body.map_visible)); if (body.map_visible_days === undefined) put('map_visible_until',''); }
-      // Auto-off: 0 = until switched off by hand, otherwise travel mode ends that many days from now.
-      if (body.map_visible_days !== undefined) { const days=integer(body.map_visible_days,'自動オフまでの日数',365); put('map_visible_until',days ? new Date(Date.now()+days*86400000).toISOString() : ''); }
-      if (body.publish_precision !== undefined) { const value=text(body.publish_precision,'公開の粒度',10); if (!['exact','city','hidden'].includes(value)) throw new InputError('公開の粒度が不正です'); put('publish_precision',value); }
-      if (body.publish_delay_hours !== undefined) put('publish_delay_hours',String(integer(body.publish_delay_hours,'公開までの時間',24*365)));
-      if (body.display_name !== undefined) writes.push(query(db,'UPDATE users SET display_name=? WHERE id=?',[text(body.display_name,'表示名',100),uid]));
-      if (body.status !== undefined) {
-        // Status line: one line, up to 40 characters. Empty clears it. Rendered with textContent only, so markup characters are allowed.
-        if (body.status !== null && typeof body.status !== 'string') throw new InputError('ステータスを確認してください');
-        const status=(body.status ?? '').trim();
-        if ([...status].length>40 || /[\r\n]/.test(status)) throw new InputError('ステータスは改行なしの40文字以内です');
-        writes.push(query(db,'UPDATE users SET status=?,status_at=? WHERE id=?',[status || null,status ? new Date().toISOString() : null,uid]));
-      }
-      if (body.bio !== undefined) writes.push(query(db,'UPDATE users SET bio=? WHERE id=?',[text(body.bio,'ひとこと',300,false),uid]));
-      if (body.icon !== undefined) {
-        if (body.icon !== null && typeof body.icon !== 'string') throw new InputError('アイコンが不正です');
-        const icon=(body.icon ?? '').trim();
-        if ([...icon].length>8 || [...new Intl.Segmenter('ja',{granularity:'grapheme'}).segment(icon)].length>2 || /[<>&"']/.test(icon)) throw new InputError('アイコンは絵文字1〜2文字です');
-        writes.push(query(db,'UPDATE users SET icon=? WHERE id=?',[icon || null,uid]));
-      }
-      if (body.tip_url !== undefined) {
-        const tip=optionalText(body.tip_url,'投げ銭リンク',500);
-        if (tip && !/^https:\/\/[^\s]+$/.test(tip)) throw new InputError('投げ銭リンクは https:// で始まるURLです');
-        writes.push(query(db,'UPDATE users SET tip_url=? WHERE id=?',[tip,uid]));
-      }
-      if (body.handle !== undefined) {
-        const handle=text(body.handle,'ハンドル',24);
-        if (!/^[a-z0-9][a-z0-9-]{1,23}$/.test(handle)) throw new InputError('ハンドルは英小文字・数字・ハイフンで2〜24文字です');
-        if (await query(db,'SELECT id FROM users WHERE handle=? AND id<>?',[handle,uid]).first()) throw new InputError('そのハンドルは使われています');
-        writes.push(query(db,'UPDATE users SET handle=? WHERE id=?',[handle,uid]));
-      }
+      const writes=await settingsWrites(db,uid,body);
       if (!writes.length) throw new InputError('変更がありません');
       await db.batch(writes);
       return json({saved:true});
+    }
+    // Sign-up: accept the terms and save the first profile and visibility choices in one step.
+    if (path === '/api/private/signup') {
+      if (body.accept !== true) throw new InputError('利用規約への同意が必要です');
+      const allowed=['display_name','handle','icon','map_visible','publish_default','publish_precision'];
+      const writes=await settingsWrites(db,uid,Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key))));
+      const now=new Date().toISOString();
+      await db.batch([...writes,query(db,'UPDATE users SET terms_accepted_at=COALESCE(terms_accepted_at,?),onboarded_at=COALESCE(onboarded_at,?) WHERE id=?',[now,now,uid])]);
+      await ensureCategories(db,uid);
+      return json({saved:true});
+    }
+    // Declining the terms removes the just-created account. Never for an account that finished sign-up or holds any record.
+    if (path === '/api/private/signup/cancel') {
+      if (user.terms_accepted_at) throw new InputError('登録済みのアカウントはここでは削除できません');
+      const used=await query(db,'SELECT (SELECT COUNT(*) FROM activities WHERE user_id=?)+(SELECT COUNT(*) FROM transactions WHERE user_id=?)+(SELECT COUNT(*) FROM trips WHERE user_id=?)+(SELECT COUNT(*) FROM attachments WHERE user_id=?) n',[uid,uid,uid,uid]).first<{n:number}>();
+      if (used?.n) throw new InputError('記録があるため、アカウントを削除できません');
+      await db.batch([query(db,'DELETE FROM categories WHERE user_id=?',[uid]),query(db,'DELETE FROM user_settings WHERE user_id=?',[uid]),query(db,'DELETE FROM footprints WHERE viewer_id=? OR owner_id=?',[uid,uid]),query(db,'DELETE FROM sessions WHERE user_id=?',[uid]),query(db,'DELETE FROM users WHERE id=? AND terms_accepted_at IS NULL',[uid])]);
+      return json({deleted:true},200,{'Set-Cookie':`tm_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${url.protocol === 'https:' ? '; Secure' : ''}`});
     }
     // 記録の編集（本人のものだけ）。公開中なら本文・場所・位置を公開側にも反映する
     const edit = path.match(/^\/api\/private\/activities\/([a-z0-9-]+)$/);
