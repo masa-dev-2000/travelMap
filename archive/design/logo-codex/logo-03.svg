@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t d">
+  <title id="t">TravelMap Compass</title><desc id="d">進路を示す簡潔なコンパス</desc>
+  <rect width="128" height="128" rx="27" fill="#1f5c4a"/>
+  <circle cx="64" cy="64" r="39" fill="none" stroke="#f3efe6" stroke-width="8"/>
+  <path d="m79 43-9 27-27 15 10-27Z" fill="#e9a23b" stroke="#f3efe6" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="64" cy="64" r="5" fill="#1f5c4a"/>
+</svg>

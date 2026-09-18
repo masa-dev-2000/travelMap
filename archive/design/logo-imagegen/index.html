@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TravelMap ロゴ案</title>
+  <style>
+    :root { color-scheme: light; --green:#1f5c4a; --ivory:#f3efe6; --amber:#e9a23b; --ink:#18342c; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,"Segoe UI","Noto Sans JP",sans-serif; background:#e9e5dc; color:var(--ink); }
+    header { padding:48px 5vw 30px; background:var(--ivory); border-bottom:1px solid #d4cfc4; }
+    h1 { margin:0 0 8px; font-size:clamp(28px,4vw,46px); letter-spacing:.02em; }
+    header p { margin:0; color:#52655e; }
+    main { width:min(1500px,94vw); margin:30px auto 64px; display:grid; gap:24px; }
+    article { overflow:hidden; border-radius:24px; background:#fff; box-shadow:0 8px 24px #17382c18; }
+    .meta { padding:20px 22px 16px; }
+    h2 { margin:0 0 5px; font-size:20px; }
+    .meta p { margin:0; color:#64736e; font-size:14px; }
+    .samples { display:grid; grid-template-columns:1fr 1fr; }
+    .stage { min-height:340px; padding:26px; display:flex; align-items:center; justify-content:center; gap:28px; flex-wrap:wrap; }
+    .stage.light { background:#f8f5ee; }
+    .stage.dark { background:#143d32; }
+    .sample { display:flex; flex-direction:column; align-items:center; gap:8px; }
+    .sample img { display:block; object-fit:contain; }
+    .s256 img { width:256px; height:256px; }
+    .s64 img { width:64px; height:64px; }
+    .s32 img { width:32px; height:32px; }
+    .sample span { padding:2px 7px; border-radius:10px; font:11px ui-monospace,monospace; }
+    .light span { background:#e8e2d6; color:#48564f; }
+    .dark span { background:#ffffff1d; color:#f3efe6; }
+    @media (max-width:900px) { .samples { grid-template-columns:1fr; } .stage { min-height:320px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TravelMap — App Icon Studies</h1>
+    <p>#1f5c4a · #f3efe6 · #e9a23b / 1024×1024 PNG / light &amp; dark checks</p>
+  </header>
+  <main id="gallery"></main>
+  <script>
+    const concepts = [
+      '一筆書きの旅の軌跡が琥珀の点で終わる',
+      '友人3人の軌跡が1点に集まる',
+      '位置ピンと時計の針の合成',
+      '折り畳み地図の3面と点線の道',
+      'TとMのモノグラムを道の線で',
+      '動きのあるコンパスの針と軌跡',
+      '重なる山並みと小さな琥珀の太陽と登る道',
+      '5つの点を結ぶ星座のような旅',
+      'ワンタップの波紋とピン',
+      '島の海岸線と沿う軌跡'
+    ];
+    const gallery = document.querySelector('#gallery');
+    const sample = (src, size) => `<div class="sample s${size}"><img src="${src}" width="${size}" height="${size}" alt=""><span>${size}px</span></div>`;
+    concepts.forEach((concept, index) => {
+      const n = String(index + 1).padStart(2, '0');
+      const src = `logo-${n}.png`;
+      gallery.insertAdjacentHTML('beforeend', `
+        <article>
+          <div class="meta"><h2>${n}</h2><p>${concept}</p></div>
+          <div class="samples">
+            <section class="stage light" aria-label="明るい背景">${sample(src,256)}${sample(src,64)}${sample(src,32)}</section>
+            <section class="stage dark" aria-label="暗い背景">${sample(src,256)}${sample(src,64)}${sample(src,32)}</section>
+          </div>
+        </article>`);
+    });
+  </script>
+</body>
+</html>

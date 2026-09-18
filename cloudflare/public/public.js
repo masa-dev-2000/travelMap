@@ -9,7 +9,7 @@ const legend=el('div',{className:'legend'});
 for(const [label,node] of [['人',personSelect],['旅',tripSelect],['カテゴリ',catSelect],['開始',fromInput],['終了',toInput]]){const wrap=el('label');wrap.append(el('span',{textContent:label}),node);filters.append(wrap);}
 filters.append(reset,totals,legend);
 const shell=mapShell([{id:'records',label:'記録',icon:'▤',nodes:[filters,list]}]);
-const map=makeMap();
+const map=makeMap();window.__tmMap=map;// マーカー位置の数値検証用(コンソールから project と比較する)
 new ResizeObserver(()=>map.invalidateSize({pan:false})).observe(document.querySelector('#map'));
 const PIN_ZOOM=11;
 const layers=L.layerGroup().addTo(map),pins=L.layerGroup().addTo(map);

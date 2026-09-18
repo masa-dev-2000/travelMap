@@ -9,7 +9,7 @@ export function prepareStyle(style,mode){
 }
 export function makeOwnerMap(){
   document.body.classList.add('vector-map');
-  const map=new gl.Map({container:'map',style:{version:8,sources:{},layers:[]},center:[134.5,35.5],zoom:6,attributionControl:false});
+  const map=new gl.Map({container:'map',style:{version:8,sources:{},layers:[]},center:[134.5,35.5],zoom:6,attributionControl:false});window.__tmMap=map;// マーカー位置の数値検証用(コンソールから project と比較する)
   map.addControl(new gl.NavigationControl({visualizePitch:true}),'top-right');
   map.addControl(new gl.AttributionControl({compact:true}));
   const control=el('details',{className:'basemap-control'}),title=el('summary',{textContent:'地図の種類'}),options=el('div',{className:'basemap-options'});

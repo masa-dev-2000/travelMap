@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t d">
+  <title id="t">TravelMap Pin</title><desc id="d">素早い記録を表す位置ピンと稲妻</desc>
+  <rect width="128" height="128" rx="27" fill="#f3efe6"/>
+  <path d="M64 16c-23 0-39 16-39 38 0 28 39 60 39 60s39-32 39-60c0-22-16-38-39-38Z" fill="#1f5c4a"/>
+  <path d="M68 33 48 62h14l-4 25 22-33H66Z" fill="#e9a23b" stroke="#f3efe6" stroke-width="3" stroke-linejoin="round"/>
+</svg>

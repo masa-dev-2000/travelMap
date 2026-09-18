@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TravelMap ロゴ案</title>
+<style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#183c32;background:#e9e6de}*{box-sizing:border-box}body{margin:0;padding:40px 20px}main{max-width:1120px;margin:auto}h1{margin:0 0 8px;font-size:30px}header p{margin:0 0 28px;color:#52645f}.section{border-radius:20px;padding:24px;margin:20px 0}.light{background:#fff}.dark{background:#132d27;color:#f3efe6}.section h2{margin:0 0 18px;font-size:18px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:16px}.card{border:1px solid rgba(80,100,94,.2);border-radius:16px;padding:16px;background:rgba(243,239,230,.5)}.dark .card{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.13)}.sizes{height:136px;display:flex;align-items:center;gap:14px}.sizes img{display:block;flex:none}.sizes img:nth-child(1){width:96px;height:96px}.sizes img:nth-child(2){width:32px;height:32px}.sizes img:nth-child(3){width:16px;height:16px}.name{font-weight:750;margin:0 0 4px}.intent{font-size:12px;line-height:1.45;margin:0;color:#52645f}.dark .intent{color:#becdc8}@media(max-width:500px){body{padding:24px 12px}.section{padding:16px}.grid{grid-template-columns:1fr 1fr}.sizes{height:110px;gap:9px}.sizes img:nth-child(1){width:76px;height:76px}}
+.sizes{height:160px}.sizes img:nth-child(1){width:128px;height:128px}
+@media(max-width:500px){.grid{grid-template-columns:1fr}.sizes{height:160px}.sizes img:nth-child(1){width:128px;height:128px}}
+</style>
+</head>
+<body><main><header><h1>TravelMap — Logo Directions</h1><p>旅の軌跡を、すばやく記録して友人と共有する。</p></header>
+<section class="section light"><h2>明るい背景</h2><div class="grid" id="light"></div></section>
+<section class="section dark"><h2>暗い背景</h2><div class="grid" id="dark"></div></section>
+</main><script>
+const logos=[
+['01','Trail','軌跡と地点を最小構成で見せる、サービス中核の記号。'],
+['02','Quick Pin','位置ピン×稲妻で「すぐ記録」を強く伝える。'],
+['03','Compass','旅の方向と発見を、端正なコンパスで表現。'],
+['04','Steps','一歩ずつ残る旅の記憶を、親しみある足あとに。'],
+['05','TM Line','TとMを一本の道に見立てた固有性の高い字標。'],
+['06','Fold Map','折り地図と現在地で、地図サービスと即座に伝える。'],
+['07','Open Road','先へ伸びる道で、旅の期待感と速度を表現。'],
+['08','Time Pin','時刻と場所を同時に残す機能を一つの印へ統合。'],
+['09','Connect','複数地点を結び、友人との共有体験を象徴。'],
+['10','Peaks','山・日の出・道で、日本発の穏やかな旅情を表現。']];
+function card([n,name,intent]){return `<article class="card"><div class="sizes"><img src="logo-${n}.svg" width="128" height="128" alt="${n} ${name}"><img src="logo-${n}.svg" width="32" height="32" alt=""><img src="logo-${n}.svg" width="16" height="16" alt=""></div><p class="name">${n}. ${name}</p><p class="intent">${intent}</p></article>`}document.querySelector('#light').innerHTML=logos.map(card).join('');document.querySelector('#dark').innerHTML=logos.map(card).join('');
+</script></body></html>

@@ -72,7 +72,9 @@ export function makeOwnerRoute(map,shell){
       const latest=label==='最新',button=el('button',{type:'button',className:latest?'who-button':'vector-endpoint',textContent:latest?'':label});
       if(latest)button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}),color:'#356f68'}));
       button.title=label+' '+new Date(r.occurred_at).toLocaleString('ja-JP');button.onclick=()=>select(idx);
-      endpoints.push(new gl.Marker({element:button,anchor:latest?'top':'right',offset:latest?[0,-19]:[0,0]}).setLngLat(point(r)).addTo(map));
+      // 最新マーカーは素の外側要素(.who-pin)を MapLibre に渡す。ボタンの all:unset が .maplibregl-marker の position:absolute を消して位置がずれるため
+      const pinEl=latest?el('div',{className:'who-pin'}):button;if(latest)pinEl.append(button);
+      endpoints.push(new gl.Marker({element:pinEl,anchor:latest?'center':'right'}).setLngLat(point(r)).addTo(map));
     }
   }
   function render(records){rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;markers();draw();}

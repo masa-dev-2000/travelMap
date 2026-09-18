@@ -31,7 +31,8 @@ export function makeOwnerFriends(map,shell){
     markers.forEach(m=>m.remove());markers=[];popup.remove();
     if(on)for(const p of people){const last=p.rows.at(-1),button=el('button',{type:'button',className:'who-button friend-marker',title:p.name});button.dataset.handle=p.author;
       button.append(whoMarker({image:last.author_icon_url,icon:last.author_icon,avatar:last.author_avatar,name:p.name,caption:p.name+' '+day(last.date),color:`hsl(${p.hue} 70% 35%)`}));button.onclick=event=>{event.stopPropagation();detail(p);};
-      markers.push(new gl.Marker({element:button,anchor:'top',offset:[0,-19]}).setLngLat([last.longitude,last.latitude]).addTo(map));}
+      const pinEl=el('div',{className:'who-pin'});pinEl.append(button);// 外側は素の要素(all:unset のボタンを直接渡すと位置がずれる)
+      markers.push(new gl.Marker({element:pinEl,anchor:'center'}).setLngLat([last.longitude,last.latitude]).addTo(map));}
     toggle.setAttribute('aria-pressed',String(on));note.textContent=on&&people.length?` · みんな ${people.length}人`:'';draw();
   }
   function group(){

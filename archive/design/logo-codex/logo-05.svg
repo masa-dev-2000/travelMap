@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t d">
+  <title id="t">TravelMap Monogram</title><desc id="d">TとMを一本の線で組んだ頭文字</desc>
+  <rect width="128" height="128" rx="27" fill="#1f5c4a"/>
+  <path d="M25 37h49M50 37v55M50 92 70 59l17 25 16-27v35" fill="none" stroke="#f3efe6" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="103" cy="92" r="8" fill="#e9a23b"/>
+</svg>
