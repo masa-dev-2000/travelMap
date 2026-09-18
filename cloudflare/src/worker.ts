@@ -19,7 +19,15 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
       const who = localOwner ? await localUser(env) : await currentUser(request,env);
       return secure(json({user: who ? {handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version == null ? null : `/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status ?? null,author_status_at:who.status_at ?? null} : null}));
     }
-    if (url.pathname.startsWith('/api/public/')) return secure(await publicApi(request,env));
+    if (url.pathname.startsWith('/api/public/')) {
+      // The shared feed is identical for every viewer and costs the most D1 reads; reuse it for a short time at the edge.
+      const cacheable=request.method === 'GET' && url.pathname === '/api/public/entries' && typeof caches !== 'undefined';
+      const key=cacheable ? new Request(url.origin+url.pathname+'?'+[...url.searchParams].filter(([name])=>name==='u').map(([name,value])=>name+'='+encodeURIComponent(value)).join('&')) : null;
+      if (key) { const hit=await caches.default.match(key); if (hit) return hit; }
+      const response=secure(await publicApi(request,env));
+      if (key && response.status === 200) { const copy=new Response(response.clone().body,response); copy.headers.set('Cache-Control','public, max-age=30'); await caches.default.put(key,copy); }
+      return response;
+    }
     // The old owner page moved to the single map page at /.
     if (['/admin','/admin/','/admin/index.html'].includes(url.pathname)) return secure(new Response(null,{status:302,headers:{Location:'/'}}));
     if (url.pathname === '/auth/google' && request.method === 'GET') return secure(await startGoogleLogin(request,env));

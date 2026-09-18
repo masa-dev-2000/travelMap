@@ -62,3 +62,7 @@ CREATE INDEX IF NOT EXISTS footprints_owner ON footprints(owner_id,created_at);
 -- Short status line shown on the shared map ("heading to Aso"). NULL = none; status_at is when it was last changed.
 ALTER TABLE users ADD COLUMN status TEXT;
 ALTER TABLE users ADD COLUMN status_at TEXT;
+CREATE INDEX IF NOT EXISTS transactions_activity ON transactions(activity_id);
+CREATE INDEX IF NOT EXISTS public_photo_objects_entry ON public_photo_objects(entry_id);
+CREATE INDEX IF NOT EXISTS activities_trip ON activities(trip_id);
+CREATE INDEX IF NOT EXISTS footprints_viewer ON footprints(viewer_id,day);
