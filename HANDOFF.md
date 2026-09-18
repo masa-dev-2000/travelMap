@@ -73,3 +73,14 @@
 - 公開フィードに `at`（時間差公開なし・公開日未編集のときだけ正確な時刻）を追加し「3時間前」表示に使用。
 - リプレイは時刻でなく記録順で約15秒に正規化。足あとは `footprints` 表（migrations/0007 本番適用済み）、1日1回・自分不可・数字なし、既読は user_settings.footprints_seen_at。
 - 本番版 a67acceb。テスト22件。未確認: 自動操作タブが hidden のため地図キャンバス上の線・リプレイ描画の目視、スマホ実機、未ログイン画面のブラウザ目視（curl とローカルDOMのみ）。ローカルD1は旧スキーマのままで dev では API が500になる。
+
+
+## D1 読み取り上限の障害と未了作業（2026-09-18 夕）
+
+- 原因: 記録ごとの支出合計サブクエリが transactions を全件走査（インデックスなし）。ログインして1回開くと約20万行、無料枠 500万行/日 を動作確認の連打で使い切り、API が 500。
+- 対応済み: migrations/0009-indexes.sql を本番適用、公開フィードを30秒エッジキャッシュ（src/worker.ts）。版 09b568c8 / commit c368222。
+- **リセット（日本時間 9:00）後にやること**
+  1. 読み取り量の実測: `d1 execute --remote --json` の meta.rows_read で、公開フィードと自分の一覧が数千行以下か確認。
+  2. `node scripts/cloudflare.mjs d1 execute travelmap --remote --file migrations/dummy-people-demo.local.sql`（ダミー3人のステータスと旅。Git管理外）。
+  3. 本番確認: ステータス表示、右ペイン/下シート、既定1週間、旅をまとめる、`/?play=kenta`。確認は最小回数で。masa の trip_id は 0 件が正。
+- 教訓: 本番フィードを確認のために何度も叩かない。検証はテストとローカルで行い、本番は最小限。新しいクエリは EXPLAIN QUERY PLAN で SCAN が無いことを見る。
