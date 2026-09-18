@@ -116,6 +116,6 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   renderPeople();show();
   return {ready,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){entries=(await response.json()).entries||[];const keep=state();setup();personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
     points:()=>on?people.flatMap(p=>p.rows.map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,filter:state,
-    tracks:()=>on?people.map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.at||r.date+'T12:00:00+09:00')}))})):[],
-    setOverride:data=>{override=data;draw();},marker:author=>markers.get(author),restoreMarkers:()=>{for(const p of people){const last=p.rows.at(-1);markers.get(p.author)?.setLngLat([last.longitude,last.latitude]);}}};
+    tracks:()=>on?people.map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.at||r.date+'T12:00:00+09:00')})),marker:markers.get(p.author)})):[],
+    setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
 }

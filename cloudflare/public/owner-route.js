@@ -5,7 +5,7 @@ const collection=features=>({type:'FeatureCollection',features});
 const point=r=>[r.longitude,r.latitude];
 const feature=(geometry,properties={})=>({type:'Feature',geometry,properties});
 export function makeOwnerRoute(map,shell){
-  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null;
+  let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null,replaying=false;
   const badge=el('button',{className:'route-overview',type:'button',textContent:'全ルート',hidden:true});document.querySelector('.map-stage').append(badge);
   const popup=new gl.Popup({maxWidth:'280px'});
   function sources(){
@@ -13,6 +13,7 @@ export function makeOwnerRoute(map,shell){
     const first=Date.parse(rows[0]?.occurred_at),span=Math.max(1,Date.parse(rows.at(-1)?.occurred_at)-first),steps=Math.max(1,rows.length-2);
     const segments=rows.slice(1).map((r,i)=>{const t=Math.min(1,Math.max(0,((Date.parse(r.occurred_at)-first)/span+i/steps)/2))||0;return feature({type:'LineString',coordinates:[point(rows[i]),point(r)]},{index:i,opacity:+(.15+.8*t).toFixed(3),width:+(1.5+2*t).toFixed(2)});});
     const records=rows.filter(r=>r.category_name!=='移動').map(r=>feature({type:'Point',coordinates:point(r)},{id:r.id}));
+    if(replaying)return {segments:collection([]),records:collection([]),selected:collection([]),ends:collection([])};// リプレイ中は元の線を隠す
     const selected=index===null?[]:[segments[index]];
     const ends=index===null?[]:[rows[index],rows[index+1]].map(r=>feature({type:'Point',coordinates:point(r)}));
     return {segments:collection(segments),records:collection(records),selected:collection(selected),ends:collection(ends)};
@@ -78,5 +79,6 @@ export function makeOwnerRoute(map,shell){
     }
   }
   function render(records){rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;markers();draw();}
-  return {setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>rows.map(point)};
+  return {setReplay:value=>{replaying=value;if(value){index=null;badge.textContent='全ルート';popup.remove();}else markers();badge.hidden=value||rows.length<2;draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.occurred_at)})),marker:endpoints.at(-1)}),
+    setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>rows.map(point)};
 }
