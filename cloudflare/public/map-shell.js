@@ -7,7 +7,7 @@ export function mapShell(groups) {
   const mapNode=document.querySelector('#map'),message=document.querySelector('#message');
   const stage=el('main',{className:'map-stage'}),rail=el('nav',{className:'map-rail'});
   rail.setAttribute('aria-label','地図のメニュー');
-  const heading=el('div',{className:'map-heading',textContent:'TravelMap'});
+  const heading=el('div',{className:'map-heading'});heading.append(el('strong',{className:'map-title',textContent:'みんなの旅'}));
   const count=el('span',{id:'map-count',textContent:'読み込み中…'});heading.append(count);
   const drawer=el('aside',{className:'map-drawer',inert:true}),backdrop=el('div',{className:'pane-backdrop'}),grip=el('div',{className:'pane-grip'});// PC は右ペイン、スマホは下からのシート(見た目は CSS)。閉じている間は inert
   drawer.setAttribute('aria-label','操作パネル');
@@ -29,7 +29,7 @@ export function mapShell(groups) {
     const view=el('div',{id:'view-'+group.id,hidden:true});for(const node of group.nodes)if(node)view.append(node);
     button.onclick=()=>{if(group.action?.())return;active===group.id?hide():open(group.id);};rail.append(button);contents.append(view);buttons.set(group.id,button);panels.set(group.id,view);
   }
-  const fit=el('button',{id:'fit-map',type:'button'});fit.setAttribute('aria-label','記録全体を表示');fit.append(el('span',{className:'rail-icon',textContent:'⌖'}),el('span',{textContent:'全体'}));rail.append(fit);
+  const fit=el('button',{id:'fit-map',type:'button'});fit.setAttribute('aria-label','すべての記録が見える範囲に移動');fit.append(el('span',{className:'rail-icon',textContent:'⌖'}),el('span',{textContent:'全体表示'}));rail.append(fit);
   stage.append(mapNode,heading,rail,backdrop,drawer,message);
   for(const node of [...document.body.children])if(node.tagName!=='SCRIPT'&&node.tagName!=='DIALOG')node.remove();
   document.body.append(stage);close.onclick=hide;backdrop.onclick=hide;

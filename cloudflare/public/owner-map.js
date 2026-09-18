@@ -12,7 +12,7 @@ export function makeOwnerMap(){
   const map=new gl.Map({container:'map',style:{version:8,sources:{},layers:[]},center:[134.5,35.5],zoom:6,attributionControl:false});window.__tmMap=map;// マーカー位置の数値検証用(コンソールから project と比較する)
   map.addControl(new gl.NavigationControl({visualizePitch:true}),'top-right');
   map.addControl(new gl.AttributionControl({compact:true}));
-  const control=el('details',{className:'basemap-control'}),title=el('summary',{textContent:'地図の種類'}),options=el('div',{className:'basemap-options'});
+  const control=el('details',{className:'basemap-control'}),title=el('summary',{textContent:'地図'}),options=el('div',{className:'basemap-options'});
   const status=el('p',{className:'basemap-status'});status.setAttribute('role','status');
   const retry=el('button',{type:'button',textContent:'再試行',hidden:true});
   const buttons=new Map();let mode='liberty',generation=0,controller,timer;
@@ -29,7 +29,7 @@ export function makeOwnerMap(){
       const response=await fetch('https://tiles.openfreemap.org/styles/'+(mode==='3d'?'liberty':mode),{signal:controller.signal});
       if(!response.ok)throw new Error('style');const style=prepareStyle(await response.json(),mode);if(run!==generation)return;
       map.stop();map.fire('basemapchanging');document.body.dataset.basemap=mode;map.setStyle(style,{diff:false});map.jumpTo({pitch:mode==='3d'?50:0,bearing:0});
-      document.body.dataset.basemap=mode;title.textContent='地図 · '+STYLES[mode];control.open=false;
+      document.body.dataset.basemap=mode;title.textContent='地図';title.setAttribute('aria-label','地図の種類: '+STYLES[mode]);control.open=false;
       try{localStorage.setItem('travelmap.basemap',mode);}catch{}
       timer=setTimeout(()=>{if(run===generation)failure();},20000);
       map.once('idle',()=>{if(run!==generation)return;clearTimeout(timer);status.textContent='';retry.hidden=true;});

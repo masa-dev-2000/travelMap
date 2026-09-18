@@ -18,8 +18,8 @@ const groups=[
   {id:'timeline',label:'タイムライン',icon:'▤',small:true,nodes:[timelineNode]},
 ];
 if(me)groups.push(
-  {id:'me',label:'じぶん',title:'じぶんの記録',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#money-panel'),$('#trip-form').closest('details'),$('#me-filters'),$('#activities').closest('section')]},
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){location.href='/admin/start/';return true;}return false;}},
+  {id:'me',label:'じぶん',title:'じぶんの記録',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#money-panel'),$('#trip-form').closest('details'),$('#me-filters'),$('#activities').closest('section')]},
 );
 const shell=mapShell(groups);
 if(!me&&!session.authenticated){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.title='Googleアカウントで登録できます';login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'はじめる'}),el('span',{textContent:'/ ログイン'}),el('span',{className:'rail-note',textContent:'Googleアカウントで登録できます'}));shell.fit.after(login);}
