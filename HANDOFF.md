@@ -84,3 +84,9 @@
   2. `node scripts/cloudflare.mjs d1 execute travelmap --remote --file migrations/dummy-people-demo.local.sql`（ダミー3人のステータスと旅。Git管理外）。
   3. 本番確認: ステータス表示、右ペイン/下シート、既定1週間、旅をまとめる、`/?play=kenta`。確認は最小回数で。masa の trip_id は 0 件が正。
 - 教訓: 本番フィードを確認のために何度も叩かない。検証はテストとローカルで行い、本番は最小限。新しいクエリは EXPLAIN QUERY PLAN で SCAN が無いことを見る。
+
+### 30秒キャッシュの扱い（ユーザー決定: 実測してから外す）
+- 公開フィードの30秒エッジキャッシュ（cloudflare/src/worker.ts）は保険。副作用は、旅モード切替や新しい記録が「みんなの地図」に出るまで最大30秒の遅れ。
+- リセット後に `meta.rows_read` を実測し、**公開フィード1回が1万行以下なら外す**（/api/public/ 分岐を `return secure(await publicApi(request,env));` の1行に戻す → test → deploy → commit）。
+- 1万行を超える場合はキャッシュを残し、支出合計を GROUP BY の1回集計に書き換えて再実測。
+- 詳細な手順: ~/.claude/plans/federated-bubbling-corbato.md
