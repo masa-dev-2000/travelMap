@@ -2,6 +2,7 @@ import {api,apiDelete,el,yen} from '/shared.js';
 import {mapShell} from '/map-shell.js';
 import {makeOwnerMap} from '/owner-map.js';
 import {makeOwnerRoute} from '/owner-route.js';
+import {makeOwnerFriends} from '/owner-friends.js';
 const $=selector=>document.querySelector(selector), message=$('#message');
 document.body.append($('#share-dialog'));
 const filters=el('div',{className:'row'});filters.append($('#trip-filter').closest('label'),$('#refresh'));
@@ -13,7 +14,8 @@ const shell=mapShell([
 ]);
 const map=makeOwnerMap();
 const route=makeOwnerRoute(map,shell);
-function fitRecords(){route.fitAll();}
+const friends=makeOwnerFriends(map,shell);
+function fitRecords(){const extra=friends.points();if(extra.length)route.fitPoints([...route.points(),...extra]);else route.fitAll();}
 shell.fit.onclick=()=>{shell.hide();fitRecords();};
 let categories=[], trips=[], activityOffset=null, transactionOffset=null;
 let noticeTimer,activityGeneration=0;
@@ -27,7 +29,7 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);pf.elements.tip_url.value=data.user.tip_url||'';}
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);friends.setSelf(data.user.handle);pf.elements.tip_url.value=data.user.tip_url||'';}
   $('#map-visible').checked=data.settings?.map_visible===true;
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');

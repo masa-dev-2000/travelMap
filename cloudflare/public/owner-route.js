@@ -76,5 +76,5 @@ export function makeOwnerRoute(map,shell){
     }
   }
   function render(records){rows=orderedRoute(records);index=null;badge.hidden=rows.length<2;markers();draw();}
-  return {setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),points:()=>rows.map(point)};
+  return {setUser:next=>{user=next;markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>rows.map(point)};
 }
