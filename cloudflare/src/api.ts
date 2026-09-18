@@ -89,7 +89,12 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
       (SELECT MIN(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') first_date,
       (SELECT MAX(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') last_date
       FROM users u WHERE u.handle=?`, [new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
-    return row ? json(row) : json({error:'Not found'},404);
+    if (!row) return json({error:'Not found'},404);
+    // Trips for the story replay: only what the public feed already shows (published, past publish_at, travel mode on). Names only, never trip ids.
+    const now = new Date().toISOString();
+    const trips = row.visible ? await query(env.DB, `SELECT tr.name,MIN(p.date) first_date,MAX(p.date) last_date,COUNT(*) entries FROM public_entries p JOIN activities a ON a.id=p.activity_id JOIN trips tr ON tr.id=a.trip_id JOIN users u ON u.id=p.user_id
+      WHERE u.handle=? AND p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) GROUP BY tr.id ORDER BY first_date DESC`, [profile[1], now]).all() : {results:[]};
+    return json({...row,trips:trips.results});
   }
   const icon = url.pathname.match(/^\/api\/public\/icons\/([a-z0-9-]+)$/);
   if (icon) {
@@ -124,7 +129,8 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       await ensureCategories(db,uid);
       const [categories, trips, settings] = await Promise.all([
         query(db,'SELECT id,kind,name,color,active FROM categories WHERE user_id=? ORDER BY sort_order,id',[uid]).all(),
-        query(db,'SELECT * FROM trips WHERE user_id=? ORDER BY starts_on DESC,id',[uid]).all(),
+        query(db,`SELECT t.*,(SELECT COUNT(*) FROM activities a WHERE a.trip_id=t.id) entries,(SELECT MIN(a.occurred_at) FROM activities a WHERE a.trip_id=t.id) first_at,(SELECT MAX(a.occurred_at) FROM activities a WHERE a.trip_id=t.id) last_at,
+          (SELECT SUM(CASE x.kind WHEN 'expense' THEN x.amount_jpy WHEN 'refund' THEN -x.amount_jpy END) FROM transactions x WHERE x.trip_id=t.id) spent_jpy FROM trips t WHERE t.user_id=? ORDER BY COALESCE(first_at,t.starts_on) DESC,t.id`,[uid]).all(),
         query(db,'SELECT key,value FROM user_settings WHERE user_id=?',[uid]).all<{key:string;value:string}>(),
       ]);
       const setting = (key:string) => settings.results.find(row => row.key === key)?.value;
@@ -237,6 +243,52 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       if (!['activity','expense','income'].includes(kind)) throw new InputError('分類の種別が不正です');
       return {statements:[query(db,'INSERT INTO categories(id,kind,name,user_id) VALUES(?,?,?,?)',[cid,kind,text(body.name,'分類名'),uid])],result:{id:cid}};
     });
+    // Group a run of records into a trip: everything between two of the user's own records (both ends included), by occurred_at.
+    if (path === '/api/private/trips/assign-range') {
+      const ends=await query(db,'SELECT id,occurred_at FROM activities WHERE user_id=? AND id IN (?,?)',[uid,text(body.from_activity_id,'始まりの記録',80),text(body.to_activity_id,'終わりの記録',80)]).all<{id:string;occurred_at:string}>();
+      if (ends.results.length !== (body.from_activity_id === body.to_activity_id ? 1 : 2)) throw new InputError('記録が見つかりません');
+      const stamps=ends.results.map(r => r.occurred_at).sort(), lo=stamps[0], hi=stamps[stamps.length-1];
+      const jst=(at:string) => new Date(Date.parse(at)+9*3600000).toISOString().slice(0,10);
+      const statements: D1PreparedStatement[]=[];
+      let tid: string;
+      if (body.trip_id !== undefined && body.trip_id !== null) {
+        const found=await trip(db,uid,body.trip_id);
+        if (!found) throw new InputError('旅が見つかりません');
+        tid=found;
+        statements.push(query(db,'UPDATE trips SET starts_on=CASE WHEN starts_on IS NULL OR starts_on>? THEN ? ELSE starts_on END,ends_on=CASE WHEN ends_on IS NULL OR ends_on<? THEN ? ELSE ends_on END WHERE id=? AND user_id=?',[jst(lo),jst(lo),jst(hi),jst(hi),tid,uid]));
+      } else {
+        tid=id();
+        statements.push(query(db,'INSERT INTO trips(id,name,starts_on,ends_on,description,user_id) VALUES(?,?,?,?,?,?)',[tid,text(body.name,'旅の名前'),jst(lo),jst(hi),'',uid]));
+      }
+      const counted=await query(db,'SELECT COUNT(*) n,SUM(CASE WHEN trip_id IS NOT NULL AND trip_id<>? THEN 1 ELSE 0 END) moved FROM activities WHERE user_id=? AND occurred_at BETWEEN ? AND ?',[tid,uid,lo,hi]).first<{n:number;moved:number|null}>();
+      // Linked transactions follow their activity (trigger activity_trip_update). Standalone ones in the same time span move here; refunds and refunded rows are left alone.
+      statements.push(query(db,'UPDATE activities SET trip_id=? WHERE user_id=? AND occurred_at BETWEEN ? AND ?',[tid,uid,lo,hi]),
+        query(db,"UPDATE transactions SET trip_id=? WHERE user_id=? AND activity_id IS NULL AND kind<>'refund' AND id NOT IN (SELECT refund_of FROM transactions WHERE refund_of IS NOT NULL) AND occurred_at BETWEEN ? AND ?",[tid,uid,lo,hi]));
+      await db.batch(statements);
+      return json({trip_id:tid,assigned:counted?.n ?? 0,moved:counted?.moved ?? 0});
+    }
+    const release = path.match(/^\/api\/private\/trips\/([a-z0-9-]+)\/release$/);
+    if (release) {
+      const tid=await trip(db,uid,release[1]);
+      if (!tid) throw new InputError('旅が見つかりません');
+      if (body.delete !== undefined && typeof body.delete !== 'boolean') throw new InputError('削除の指定が不正です');
+      const counted=await query(db,'SELECT COUNT(*) n FROM activities WHERE trip_id=? AND user_id=?',[tid,uid]).first<{n:number}>();
+      const statements=[query(db,'UPDATE activities SET trip_id=NULL WHERE trip_id=? AND user_id=?',[tid,uid]),query(db,'UPDATE transactions SET trip_id=NULL WHERE trip_id=? AND user_id=? AND activity_id IS NULL',[tid,uid])];
+      if (body.delete === true) statements.push(query(db,'DELETE FROM trips WHERE id=? AND user_id=?',[tid,uid]));
+      try { await db.batch(statements); } catch { throw new InputError('この旅は解除できません（返金や予算が紐づいています）'); }
+      return json({released:counted?.n ?? 0,deleted:body.delete === true});
+    }
+    const rename = path.match(/^\/api\/private\/trips\/([a-z0-9-]+)$/);
+    if (rename) {
+      const tid=await trip(db,uid,rename[1]);
+      if (!tid) throw new InputError('旅が見つかりません');
+      const writes: D1PreparedStatement[]=[];
+      if (body.name !== undefined) writes.push(query(db,'UPDATE trips SET name=? WHERE id=? AND user_id=?',[text(body.name,'旅の名前'),tid,uid]));
+      if (body.description !== undefined) writes.push(query(db,'UPDATE trips SET description=? WHERE id=? AND user_id=?',[text(body.description,'説明',4000,false),tid,uid]));
+      if (!writes.length) throw new InputError('変更がありません');
+      await db.batch(writes);
+      return json({saved:true});
+    }
     const assign = path.match(/^\/api\/private\/trips\/([a-z0-9-]+)\/assign$/);
     if (assign) {
       const tid=await trip(db,uid,assign[1]);

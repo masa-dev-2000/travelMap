@@ -392,3 +392,49 @@ test('footprints: once per day per person, never for yourself or hidden people, 
   await env.DB.prepare("UPDATE footprints SET created_at=?").bind(new Date(Date.now()-15*86400000).toISOString()).run();
   assert.equal((await(await owner('/api/private/footprints')).json()).visitors.length,0);
 });
+
+test('assign-range groups the records between two own records (ends included), moves them from another trip with their transactions; rename, release and public trips',async()=>{
+  const make=async(at,extra={})=>(await(await owner('/api/private/activities',activity({occurred_at:at,memo:'RANGE',publish:true,...extra}))).json());
+  const a=await make('2024-02-01T01:00:00Z'),b=await make('2024-02-02T01:00:00Z',{transaction:{category_id:'cost',amount_minor:1200,currency:'JPY',minor_unit:0}}),c=await make('2024-02-03T01:00:00Z'),d=await make('2024-02-05T01:00:00Z');
+  const foreign=await(await asUser2('/api/private/activities',{category_id:'u2-action',occurred_at:'2024-02-02T05:00:00Z',memo:'U2'})).json();
+  await owner('/api/private/transactions',{kind:'expense',category_id:'cost',occurred_at:'2024-02-02T09:00:00Z',currency:'JPY',minor_unit:0,amount_minor:300,amount_jpy:null,conversion_status:'final',description:'standalone',trip_id:null,refund_of:null});
+  const old=await(await owner('/api/private/trips',{name:'古い旅'})).json();
+  assert.equal((await owner(`/api/private/activities/${b.id}`,{trip_id:old.id})).status,200);
+  assert.equal((await owner('/api/private/trips/assign-range',{name:'冬の旅',from_activity_id:a.id,to_activity_id:foreign.id})).status,400);
+  assert.equal((await owner('/api/private/trips/assign-range',{name:'',from_activity_id:a.id,to_activity_id:c.id})).status,400);
+  assert.equal((await owner('/api/private/trips/assign-range',{trip_id:'missing',from_activity_id:a.id,to_activity_id:c.id})).status,400);
+  // reversed order works the same; both ends are included
+  const made=await(await owner('/api/private/trips/assign-range',{name:'冬の旅',from_activity_id:c.id,to_activity_id:a.id})).json();
+  assert.equal(made.assigned,3);assert.equal(made.moved,1);
+  const tripOf=async id=>(await env.DB.prepare('SELECT trip_id FROM activities WHERE id=?').bind(id).first()).trip_id;
+  for(const item of [a,b,c])assert.equal(await tripOf(item.id),made.trip_id);
+  assert.equal(await tripOf(d.id),null);assert.equal(await tripOf(foreign.id),null);
+  const tx=await env.DB.prepare("SELECT COUNT(*) n FROM transactions WHERE trip_id=?").bind(made.trip_id).first();assert.equal(tx.n,2);
+  const row=await env.DB.prepare('SELECT starts_on,ends_on FROM trips WHERE id=?').bind(made.trip_id).first();assert.deepEqual([row.starts_on,row.ends_on],['2024-02-01','2024-02-03']);
+  // extend an existing trip to one more record
+  const more=await(await owner('/api/private/trips/assign-range',{trip_id:made.trip_id,from_activity_id:d.id,to_activity_id:d.id})).json();assert.equal(more.assigned,1);
+  assert.equal((await env.DB.prepare('SELECT ends_on FROM trips WHERE id=?').bind(made.trip_id).first()).ends_on,'2024-02-05');
+  const boot=(await(await owner('/api/private/bootstrap')).json()).trips.find(t=>t.id===made.trip_id);assert.equal(boot.entries,4);assert.equal(boot.spent_jpy,1500);
+  // rename: own trips only
+  assert.equal((await owner(`/api/private/trips/${made.trip_id}`,{name:'冬の旅2'})).status,200);
+  assert.equal((await owner(`/api/private/trips/${made.trip_id}`,{})).status,400);
+  assert.equal((await asUser2(`/api/private/trips/${made.trip_id}`,{name:'X'})).status,400);
+  assert.equal((await asUser2(`/api/private/trips/${made.trip_id}/release`,{delete:true})).status,400);
+  // public profile lists trips by name from published entries only, and nothing while travel mode is off
+  await owner('/api/private/settings',{map_visible:true});
+  const profile=await(await handle(request('/api/public/users/local'),env)).json();
+  const listed=profile.trips.find(t=>t.name==='冬の旅2');assert.deepEqual([listed.first_date,listed.last_date,listed.entries],['2024-02-01','2024-02-05',4]);
+  assert.ok(!JSON.stringify(profile).includes(made.trip_id));
+  await env.DB.prepare("UPDATE public_entries SET status='draft' WHERE id=?").bind(d.public_id).run();
+  assert.equal((await(await handle(request('/api/public/users/local'),env)).json()).trips.find(t=>t.name==='冬の旅2').entries,3);
+  await owner('/api/private/settings',{map_visible:false});
+  assert.deepEqual((await(await handle(request('/api/public/users/local'),env)).json()).trips,[]);
+  await owner('/api/private/settings',{map_visible:true});
+  // release keeps the trip; delete:true removes it
+  assert.equal((await(await owner(`/api/private/trips/${made.trip_id}/release`,{})).json()).released,4);
+  assert.equal(await tripOf(a.id),null);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) n FROM transactions WHERE trip_id=?").bind(made.trip_id).first()).n,0);
+  assert.ok(await env.DB.prepare('SELECT id FROM trips WHERE id=?').bind(made.trip_id).first());
+  assert.equal((await(await owner(`/api/private/trips/${made.trip_id}/release`,{delete:true})).json()).deleted,true);
+  assert.equal(await env.DB.prepare('SELECT id FROM trips WHERE id=?').bind(made.trip_id).first(),null);
+});
