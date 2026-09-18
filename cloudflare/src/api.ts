@@ -68,7 +68,7 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
     const handle = url.searchParams.get('u'), now = new Date().toISOString();
     const entries = await query(env.DB, `SELECT p.id,p.date,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
-      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,
+      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
@@ -86,6 +86,12 @@ export async function publicApi(request: Request, env: Env): Promise<Response> {
       (SELECT MAX(p.date) FROM public_entries p WHERE p.user_id=u.id AND p.status='published') last_date
       FROM users u WHERE u.handle=?`, [new Date().toISOString(), text(profile[1],'ユーザー',40)]).first();
     return row ? json(row) : json({error:'Not found'},404);
+  }
+  const icon = url.pathname.match(/^\/api\/public\/icons\/([a-z0-9-]+)$/);
+  if (icon) {
+    const owner = await query(env.DB,'SELECT id FROM users WHERE handle=? AND icon_version IS NOT NULL',[icon[1]]).first<{id:string}>();
+    const object = owner ? await env.FILES.get(`icons/${owner.id}.png`) : null;
+    return object ? new Response(object.body, {headers:{'Content-Type':'image/png','Cache-Control':url.searchParams.has('v') ? 'public, max-age=31536000, immutable' : 'no-cache'}}) : json({error:'Not found'},404);
   }
   const photo = url.pathname.match(/^\/api\/public\/photos\/([a-z0-9-]+)$/);
   if (photo) {
@@ -118,7 +124,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
         query(db,'SELECT key,value FROM user_settings WHERE user_id=?',[uid]).all<{key:string;value:string}>(),
       ]);
       const setting = (key:string) => settings.results.find(row => row.key === key)?.value;
-      return json({user,categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0),map_visible:setting('map_visible') === 'true'}});
+      return json({user:{...user,icon_url:user.icon_version == null ? null : `/api/public/icons/${user.handle}?v=${user.icon_version}`},categories:categories.results,trips:trips.results,settings:{publish_default:setting('publish_default') === 'true',publish_precision:setting('publish_precision') ?? 'exact',publish_delay_hours:Number(setting('publish_delay_hours') ?? 0),map_visible:setting('map_visible') === 'true'}});
     }
     if (path === '/api/private/activities') {
       const offset = integer(Number(url.searchParams.get('offset') ?? 0),'ページ');
@@ -160,6 +166,18 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
     }
   }
   if (request.method === 'POST' && path === '/api/private/attachments') return upload(request,env,uid);
+  if (path === '/api/private/icon' && request.method === 'POST') {
+    if (request.headers.get('Content-Type') !== 'image/png') throw new InputError('アイコンはPNG画像です');
+    const png=cleanPng(await readBytes(request,512*1024)), previous=user.icon_version ?? 0, version=Math.max(previous+1,Math.floor(Date.now()/1000));
+    await env.FILES.put(`icons/${uid}.png`,png,{httpMetadata:{contentType:'image/png'}});
+    await query(db,'UPDATE users SET icon_version=? WHERE id=?',[version,uid]).run();
+    return json({icon_url:`/api/public/icons/${user.handle}?v=${version}`},201);
+  }
+  if (path === '/api/private/icon' && request.method === 'DELETE') {
+    await query(db,'UPDATE users SET icon_version=NULL WHERE id=?',[uid]).run();
+    await env.FILES.delete(`icons/${uid}.png`);
+    return json({deleted:true});
+  }
   if (request.method === 'POST') {
     const body = await readInput(request);
     if (path === '/api/private/activities') return saveOnce(request,db,uid,body,async () => {

@@ -298,3 +298,28 @@ test('hidden mode removes a person from the shared map without unpublishing; vis
   assert.equal((await owner('/api/private/settings',{map_visible:true})).status,200);
   assert.equal(await has(),true);
 });
+
+test('map icon image: PNG only, 512KB cap, served by handle, in the feed, and removable only by its owner',async()=>{
+  const header=Buffer.alloc(13);header.writeUInt32BE(1,0);header.writeUInt32BE(1,4);header[8]=8;header[9]=2;
+  const png=Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('tEXt',Buffer.from('GPS\0PRIVATE')),chunk('IDAT',deflateSync(Buffer.from([0,255,0,0]))),chunk('IEND',Buffer.alloc(0))]);
+  const send=(body,cookie,type='image/png',method='POST')=>handle(new Request('https://travel.test/api/private/icon',{method,headers:{Origin:'https://travel.test','Content-Type':type,...(cookie?{Cookie:cookie}:{})},body}),env,!cookie);
+  assert.equal((await send(Buffer.from('not a png'))).status,400);
+  assert.equal((await send(png,'','image/jpeg')).status,400);
+  assert.equal((await send(Buffer.concat([png,Buffer.alloc(512*1024)]))).status,400);
+  assert.equal((await handle(request('/api/public/icons/local'),env)).status,404);
+  const saved=await send(png);assert.equal(saved.status,201);const {icon_url}=await saved.json();assert.match(icon_url,/^\/api\/public\/icons\/local\?v=\d+$/);
+  await asUser2('/api/private/me');assert.equal((await send(png,u2Cookie)).status,201);
+  const served=await handle(request(icon_url),env);assert.equal(served.status,200);assert.equal(served.headers.get('Content-Type'),'image/png');assert.match(served.headers.get('Cache-Control'),/immutable/);
+  assert.ok(!Buffer.from(await served.arrayBuffer()).includes('PRIVATE'));
+  assert.equal((await handle(request('/api/public/icons/local'),env)).headers.get('Cache-Control'),'no-cache');
+  assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon_url,icon_url);
+  await owner('/api/private/activities',activity({memo:'ICON IMAGE',publish:true}));
+  const feed=await(await handle(request('/api/public/entries?u=local'),env)).json();
+  assert.ok(feed.entries.length&&feed.entries.every(e=>e.author_icon_url===icon_url));
+  assert.equal((await send(undefined,u2Cookie,'image/png','DELETE')).status,200);
+  assert.equal((await handle(request('/api/public/icons/second'),env)).status,404);
+  assert.equal((await handle(request(icon_url),env)).status,200);
+  assert.equal((await send(undefined,'','image/png','DELETE')).status,200);
+  assert.equal((await handle(request(icon_url),env)).status,404);assert.equal((await handle(request('/api/public/icons/nobody'),env)).status,404);
+  assert.equal((await(await handle(request('/api/public/entries?u=local'),env)).json()).entries[0].author_icon_url,null);
+});

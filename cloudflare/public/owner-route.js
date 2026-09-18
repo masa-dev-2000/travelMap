@@ -70,7 +70,7 @@ export function makeOwnerRoute(map,shell){
     if(rows.length)for(const [r,label,idx] of [[rows[0],'始点',0],[rows.at(-1),'最新',rows.length-2]]){
       if(rows.length===1&&label==='始点')continue;
       const latest=label==='最新',button=el('button',{type:'button',className:latest?'who-button':'vector-endpoint',textContent:latest?'':label});
-      if(latest)button.append(whoMarker({icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}),color:'#356f68'}));
+      if(latest)button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'}),color:'#356f68'}));
       button.title=label+' '+new Date(r.occurred_at).toLocaleString('ja-JP');button.onclick=()=>select(idx);
       endpoints.push(new gl.Marker({element:button,anchor:latest?'top':'right',offset:latest?[0,-19]:[0,0]}).setLngLat(point(r)).addTo(map));
     }

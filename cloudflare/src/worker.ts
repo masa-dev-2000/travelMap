@@ -8,7 +8,7 @@ const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_n
 async function localUser(env: Env): Promise<User> {
   await env.DB.prepare('INSERT OR IGNORE INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES(?,?,?,?,?,?,?)')
     .bind(LOCAL_USER.id, null, LOCAL_USER.email, LOCAL_USER.display_name, LOCAL_USER.handle, null, new Date().toISOString()).run();
-  return await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,bio,tip_url FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
+  return await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
 }
 
 export async function handle(request: Request, env: Env, localOwner = false): Promise<Response> {

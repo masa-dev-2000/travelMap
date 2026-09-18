@@ -46,3 +46,5 @@ ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN tip_url TEXT;
 -- Map marker icon chosen by the user (emoji). NULL falls back to the Google avatar, then the initial.
 ALTER TABLE users ADD COLUMN icon TEXT;
+-- Uploaded map marker image lives in R2 at icons/<user_id>.png. NULL = no image; the value changes on every upload and busts caches.
+ALTER TABLE users ADD COLUMN icon_version INTEGER;
