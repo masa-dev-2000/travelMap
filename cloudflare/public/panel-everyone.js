@@ -8,7 +8,7 @@ export {ago};
 const PERIODS=[['7','1週間'],['30','1か月'],['90','3か月'],['all','全期間']],PERIOD_LABEL={7:'この1週間',30:'この1か月',90:'この3か月',all:'全期間',custom:'この期間'};
 const jstToday=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
 const daysBefore=(date,n)=>new Date(Date.parse(date+'T00:00:00Z')-n*86400000).toISOString().slice(0,10);
-export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFilter,onOpenPerson}){
+export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFilter,onOpenPerson,onPlay}){
   let people=[],everyone=[],markers=new Map(),styleReady=false,self=null,entries=[],shown=[],on=true,loaded=false,period='7',preset='7';
   try{const saved=localStorage.getItem('travelmap.period');if(PERIODS.some(([key])=>key===saved))period=preset=saved;}catch{}
   if(showToggle)try{on=localStorage.getItem('travelmap.friends')!=='off';}catch{}
@@ -42,6 +42,7 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
     if(p.stale)node.append(el('p',{className:'hint',textContent:'この期間の記録はありません。最後の記録: '+ago(p.recent.at(-1))}));
     for(const r of p.recent.slice(-4).reverse()){const item=el('div',{className:'friend-entry'});item.append(el('time',{textContent:[r.date,r.category_name].filter(Boolean).join('・')}),el('b',{textContent:r.place_name||'旅のひとこま'}));
       if(r.spent_jpy!=null)item.append(el('span',{className:'spent',textContent:yen(r.spent_jpy)}));if(r.memo)item.append(el('p',{textContent:r.memo}));node.append(item);}
+    const replayButton=el('button',{type:'button',className:'friend-play',textContent:'▶ 旅を再生'});replayButton.onclick=()=>{popup.remove();onPlay?.(p.author);};node.append(replayButton);
     const last=p.recent.at(-1);popup.setLngLat([last.longitude,last.latitude]).setDOMContent(node).addTo(map);
     if(p.author!==self)onOpenPerson?.(p.author);
   }
@@ -105,7 +106,8 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
         if(spot){map.flyTo({center:[spot.longitude,spot.latitude],zoom:Math.max(map.getZoom(),10)});detail({author:person.author,name:last.author_name||person.author,rows:person.rows,recent:person.rows,stale:!person.all.some(within)});}
         else{personSelect.value=person.author;apply();shell.open('timeline');}
       };
-      peopleNode.append(button);
+      const row=el('div',{className:'person-line'}),playButton=el('button',{type:'button',className:'person-play',textContent:'▶'});playButton.setAttribute('aria-label',(last.author_name||person.author)+'の旅を再生');playButton.onclick=()=>onPlay?.(person.author);
+      row.append(button,playButton);peopleNode.append(row);
     }
   }
   function setup(){
@@ -126,7 +128,17 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   map.on('style.load',()=>{styleReady=true;draw();});
   const ready=(async()=>{try{const response=await fetch('/api/public/entries');if(!response.ok)throw new Error('記録を読み込めませんでした。');entries=(await response.json()).entries||[];}catch(error){totals.textContent=error.message;}loaded=true;setup();apply(false);renderPeople();})();
   renderPeople();show();
-  return {ready,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
+  // 旅の再生の選択肢(公開フィードだけから作る): 旅ごと・表示中の期間・すべて。trip は共有URL用('' = すべて)
+  function storyOptions(handle){
+    const mine=entries.filter(e=>e.author===handle).reverse().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);if(!mine.length)return [];
+    const latest=mine.at(-1),name=latest.author_name||handle,color=`hsl(${hueOf(handle)} 70% 38%)`,face={image:latest.author_icon_url,icon:latest.author_icon,avatar:latest.author_avatar,name};
+    const steps=rows=>rows.map(e=>({date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos,lng:e.longitude,lat:e.latitude}));
+    const option=(label,rows,trip)=>({label,trip,note:`${day(rows[0].date)}〜${day(rows.at(-1).date)} · ${rows.length}件`,load:async()=>({title:trip?`${name}・${trip}`:`${name}の旅`,steps:steps(rows),face,color,shareUrl:trip===undefined?null:'/?play='+encodeURIComponent(handle)+(trip?'&trip='+encodeURIComponent(trip):'')})});
+    const options=[...new Set(mine.map(e=>e.trip_name).filter(Boolean))].map(trip=>option(trip,mine.filter(e=>e.trip_name===trip),trip)),inPeriod=mine.filter(within);
+    if(period!=='all'&&inPeriod.length&&inPeriod.length<mine.length)options.push(option(PERIOD_LABEL[period],inPeriod,undefined));
+    options.push(option('すべての公開記録',mine,''));return options;
+  }
+  return {ready,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
     points:()=>on?people.flatMap(p=>(p.rows.length?p.rows:[p.last]).map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,shownCount:()=>shown.length,countText,filter:state,
     tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.at||r.date+'T12:00:00+09:00')})),marker:markers.get(p.author)})):[],
     setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
