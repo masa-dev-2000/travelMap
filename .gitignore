@@ -18,3 +18,7 @@ __pycache__/
 /cloudflare/build/
 /cloudflare/wrangler.production.jsonc
 /cloudflare/public/vendor/
+
+# 作業の申し送りはローカルだけに置く
+/HANDOFF.md
+/.agent-handoff/
