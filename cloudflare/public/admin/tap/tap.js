@@ -21,8 +21,14 @@ function locate(){
     where.className='ok';where.lastElementChild.textContent=`位置 ±${Math.round(position.accuracy)}m`;
   },()=>{if(!position)where.lastElementChild.textContent='位置を取得できません';},{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
 }
-const fresh=()=>position&&Date.now()-position.at<60000;
-async function waitForFix(){const start=Date.now();while(!fresh()&&Date.now()-start<WAIT_FOR_FIX_MS)await new Promise(resolve=>setTimeout(resolve,200));}
+// 5分以内の位置はそのまま使う。古ければ押した時に取り直し、最大4秒だけ待つ
+const fresh=()=>position&&Date.now()-position.at<300000;
+function waitForFix(){
+  return new Promise(resolve=>{
+    const timer=setTimeout(resolve,WAIT_FOR_FIX_MS);
+    navigator.geolocation?.getCurrentPosition(result=>{position={latitude:result.coords.latitude,longitude:result.coords.longitude,accuracy:result.coords.accuracy,at:Date.now()};clearTimeout(timer);resolve();},()=>{clearTimeout(timer);resolve();},{enableHighAccuracy:true,maximumAge:60000,timeout:WAIT_FOR_FIX_MS});
+  });
+}
 
 // 画面を消さない（対応端末のみ）
 async function keepAwake(){try{if('wakeLock'in navigator)await navigator.wakeLock.request('screen');}catch{}}

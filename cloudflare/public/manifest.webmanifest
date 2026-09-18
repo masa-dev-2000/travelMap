@@ -2,7 +2,7 @@
   "name": "TravelMap",
   "short_name": "TravelMap",
   "description": "旅と暮らしを、地図と一緒に記録する",
-  "start_url": "/admin/record/",
+  "start_url": "/admin/start/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f3efe6",

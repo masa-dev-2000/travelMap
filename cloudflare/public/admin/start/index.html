@@ -1,0 +1,15 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#16362d"><meta name="mobile-web-app-capable" content="yes"><title>記録をはじめる | TravelMap</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icon.svg">
+<style>
+:root{--bg:#16362d;--ink:#f3efe6;--muted:#a9c2b8;font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--ink)}
+body{display:flex;flex-direction:column;gap:14px;height:100dvh;padding:max(14px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom))}
+header{flex:none;display:flex;align-items:baseline;gap:10px}h1{margin:0;font-size:20px}header a{margin-left:auto;color:var(--muted);font-size:14px;padding:8px 0}
+a.way{flex:1;display:flex;flex-direction:column;justify-content:center;gap:8px;padding:24px;border-radius:32px;color:#fff;text-decoration:none;box-shadow:0 18px 40px -18px #000c,inset 0 2px 0 #ffffff33;transition:transform .08s}
+a.way:active{transform:scale(.98)}
+.tap{background:radial-gradient(circle at 30% 30%,#2f7d63,#1f5c4a)}.detail{background:radial-gradient(circle at 30% 30%,#e0a24a,#c77f24)}
+.way strong{font-size:clamp(28px,8vw,44px);font-weight:800;letter-spacing:.02em}.way span{font-size:15px;opacity:.9;line-height:1.5}
+</style></head>
+<body><header><h1>記録をはじめる</h1><a href="/admin/">地図・一覧</a></header>
+<a class="way tap" href="/admin/tap/"><strong>位置だけ</strong><span>ボタンを1回押すと、今の場所と時刻を残します</span></a>
+<a class="way detail" href="/admin/record/"><strong>くわしく</strong><span>カテゴリ・金額・メモ・写真・評価を入力します</span></a>
+</body></html>

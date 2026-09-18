@@ -8,7 +8,7 @@ const filters=el('div',{className:'row'});filters.append($('#trip-filter').close
 const shell=mapShell([
   {id:'records',label:'記録',icon:'▤',nodes:[filters,$('#activities').closest('section')]},
   {id:'money',label:'収支',icon:'¥',nodes:[$('#summary').closest('section'),$('#transactions').closest('details')]},
-  {id:'add',label:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/tap/',textContent:'ワンタップ記録（位置と時刻だけ）→'}),el('a',{className:'quick-record',href:'/admin/record/',textContent:'スマホ用の記録画面を開く →'}),$('#activity-form').closest('details'),$('#transaction-form').closest('details')]},
+  {id:'add',label:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#activity-form').closest('details'),$('#transaction-form').closest('details')]},
   {id:'settings',label:'設定',icon:'⚑',nodes:[$('#settings-panel'),$('#trip-form').closest('details'),$('#review-note')]},
 ]);
 const map=makeOwnerMap();
