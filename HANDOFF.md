@@ -64,3 +64,12 @@
 - 5観点×3反証のレビュー（137エージェント）で36件を確認し、高・中の実害があるものは修正済み。残課題: 401後の戻り先(next)、公開時の trip/category/金額のスナップショット化、request_receipts のユーザー分離は uid 接頭辞で対応済み。
 - 未実施: Google ログインの本番動作確認（所有者が実施）→ 確認後に Cloudflare Access アプリ travelmap-owner を削除し、ACCESS_* vars とフォールバックを撤去する。
 - Google OAuth: 同意画面は「テスト」状態。他人に公開する前に「本番」へ切替（機密スコープ無しのため審査不要）。シークレットは wrangler secret `GOOGLE_CLIENT_SECRET`。
+
+## 1つの地図に統合・リプレイ・足あと（2026-09-18）
+
+- `/` が唯一の地図ページ（MapLibre）。未ログインは公開データのみ、ログインで「じぶん」「＋」と右上アイコンの設定シートが増える。`/admin/` は `/` へ302、`/admin/start/` `/admin/record/` は従来どおり。Leaflet 版 public.js は撤去。
+- 構成: `public/app.js`（入口・`GET /api/public/session` で判定）、`panel-everyone.js`（みんな一覧・タイムライン絞り込み・線とアイコン）、`panel-me.js`（ログイン時だけ動的 import。私的データは /api/private/* のみ）、`replay.js`、`map-shell.js`（action 付きレール）。
+- 設定は 旅モード（map_visible + 自動オフ `map_visible_until`、`map_visible_days` で指定）/ 見せ方 / プロフィール。公開側の判定は `travelling()`（api.ts）に集約。
+- 公開フィードに `at`（時間差公開なし・公開日未編集のときだけ正確な時刻）を追加し「3時間前」表示に使用。
+- リプレイは時刻でなく記録順で約15秒に正規化。足あとは `footprints` 表（migrations/0007 本番適用済み）、1日1回・自分不可・数字なし、既読は user_settings.footprints_seen_at。
+- 本番版 a67acceb。テスト22件。未確認: 自動操作タブが hidden のため地図キャンバス上の線・リプレイ描画の目視、スマホ実機、未ログイン画面のブラウザ目視（curl とローカルDOMのみ）。ローカルD1は旧スキーマのままで dev では API が500になる。

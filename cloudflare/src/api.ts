@@ -156,6 +156,16 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       if (!env.OWNER_EMAIL || user.email.toLowerCase() !== env.OWNER_EMAIL.toLowerCase()) return json({count:0});
       return json(await query(db,"SELECT COUNT(*) count FROM source_records WHERE status='needs_review'").first());
     }
+    if (path === '/api/private/footprints') {
+      // Who looked at my records lately: one line per person (latest visit), 14 days, 10 people. No counts.
+      const since=new Date(Date.now()-14*86400000).toISOString();
+      const [rows, seen] = await Promise.all([
+        query(db,`SELECT u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END icon_url,MAX(f.created_at) at
+          FROM footprints f JOIN users u ON u.id=f.viewer_id WHERE f.owner_id=? AND f.created_at>=? GROUP BY f.viewer_id ORDER BY at DESC LIMIT 10`,[uid,since]).all<{at:string}>(),
+        query(db,"SELECT value FROM user_settings WHERE user_id=? AND key='footprints_seen_at'",[uid]).first<{value:string}>(),
+      ]);
+      return json({visitors:rows.results,unread:rows.results.some(row => row.at > (seen?.value ?? ''))});
+    }
     const attachment = path.match(/^\/api\/private\/attachments\/([a-z0-9-]+)$/);
     if (attachment) {
       const record = await query(db,'SELECT storage_location,media_type FROM attachments WHERE id=? AND user_id=?',[attachment[1],uid]).first<{storage_location:string;media_type:string}>();
@@ -237,6 +247,18 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       await query(db,"UPDATE activities SET trip_id=? WHERE user_id=? AND date(occurred_at,'+9 hours') BETWEEN ? AND ?",[tid,uid,from,to]).run();
       const counted=await query(db,'SELECT COUNT(*) n FROM activities WHERE trip_id=?',[tid]).first<{n:number}>();
       return json({assigned:counted?.n ?? 0});
+    }
+    if (path === '/api/private/footprints') {
+      const target=await query(db,`SELECT u.id FROM users u WHERE u.handle=? AND ${travelling('u.id')}`,[text(body.handle,'ユーザー',40),new Date().toISOString()]).first<{id:string}>();
+      if (!target) throw new InputError('いま旅モード中の人ではありません');
+      if (target.id === uid) return json({recorded:false});
+      const now=new Date();
+      const result=await query(db,"INSERT OR IGNORE INTO footprints(id,viewer_id,owner_id,day,created_at) VALUES(?,?,?,?,?)",[id(),uid,target.id,new Date(now.getTime()+9*3600000).toISOString().slice(0,10),now.toISOString()]).run();
+      return json({recorded:result.meta.changes > 0});
+    }
+    if (path === '/api/private/footprints/seen') {
+      await query(db,"INSERT INTO user_settings(user_id,key,value) VALUES(?,'footprints_seen_at',?) ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value",[uid,new Date().toISOString()]).run();
+      return json({saved:true});
     }
     if (path === '/api/private/settings') {
       const writes: D1PreparedStatement[]=[];

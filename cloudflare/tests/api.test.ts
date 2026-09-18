@@ -349,3 +349,26 @@ test('travel mode auto-off: an elapsed map_visible_until hides the person everyw
   assert.equal(await until(),'');assert.equal(await has(),true);
   assert.equal((await(await handle(request('/api/public/users/'+handleName),env)).json()).visible,1);
 });
+
+test('footprints: once per day per person, never for yourself or hidden people, readable only by the owner, no counts',async()=>{
+  await owner('/api/private/settings',{map_visible:true});
+  const me=(await(await owner('/api/private/bootstrap')).json()).user.handle;
+  assert.equal((await handle(request('/api/private/footprints',{handle:me}),env)).status,401);
+  assert.deepEqual(await(await asUser2('/api/private/footprints',{handle:me})).json(),{recorded:true});
+  assert.deepEqual(await(await asUser2('/api/private/footprints',{handle:me})).json(),{recorded:false});
+  assert.deepEqual(await(await owner('/api/private/footprints',{handle:me})).json(),{recorded:false});
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) n FROM footprints').first()).n,1);
+  assert.equal((await asUser2('/api/private/footprints',{handle:'nobody-here'})).status,400);
+  await owner('/api/private/settings',{map_visible:false});
+  assert.equal((await asUser2('/api/private/footprints',{handle:me})).status,400);
+  await owner('/api/private/settings',{map_visible:true});
+  const mine=await(await owner('/api/private/footprints')).json();
+  assert.equal(mine.visitors.length,1);assert.equal(mine.visitors[0].handle,'second');assert.equal(mine.unread,true);
+  assert.ok(!JSON.stringify(mine).includes('example.com'));assert.ok(!('count' in mine)&&!('total' in mine));
+  const theirs=await(await asUser2('/api/private/footprints')).json();
+  assert.deepEqual(theirs,{visitors:[],unread:false});
+  assert.equal((await owner('/api/private/footprints/seen',{})).status,200);
+  assert.equal((await(await owner('/api/private/footprints')).json()).unread,false);
+  await env.DB.prepare("UPDATE footprints SET created_at=?").bind(new Date(Date.now()-15*86400000).toISOString()).run();
+  assert.equal((await(await owner('/api/private/footprints')).json()).visitors.length,0);
+});

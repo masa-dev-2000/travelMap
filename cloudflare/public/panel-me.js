@@ -183,6 +183,18 @@ const face=el('button',{type:'button',className:'me-button'});face.setAttribute(
 function paintFace(user){face.replaceChildren(whoMarker({image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name,color:'#356f68'}));}
 paintFace(me);face.onclick=()=>$('#settings-dialog').showModal();$('#close-settings').onclick=()=>$('#settings-dialog').close();
 $('#settings-dialog').addEventListener('click',event=>{if(event.target===event.currentTarget)event.currentTarget.close();});
+// 足あと: 最近見てくれた人(数字は出さない)。未読があればレールの「じぶん」に点を付け、パネルを開いたら既読にする
+const ago=at=>{const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));return minutes<2?'たった今':minutes<60?minutes+'分前':minutes<1440?Math.floor(minutes/60)+'時間前':Math.floor(minutes/1440)+'日前';};
+async function footprints(){
+  try{const data=await api('footprints'),box=$('#footprints');box.replaceChildren();shell.button('me').classList.toggle('rail-dot',data.unread);
+    if(!data.visitors.length)return;box.append(el('h2',{textContent:'最近見てくれた人'}));const row=el('div',{className:'visitors'});
+    for(const v of data.visitors){const item=el('div',{className:'visitor'});item.append(whoMarker({image:v.icon_url,icon:v.icon,avatar:v.avatar_url,name:v.display_name,color:'#356f68'}),el('strong',{textContent:v.display_name}),el('span',{textContent:ago(v.at)}));row.append(item);}
+    box.append(row);}catch{}
+}
+shell.drawer.addEventListener('viewchange',async event=>{if(event.detail==='me'&&shell.button('me').classList.contains('rail-dot')){try{await api('footprints/seen',{});shell.button('me').classList.remove('rail-dot');}catch{}}});
+const visitedToday=new Set();
+function visited(handle){if(visitedToday.has(handle))return;visitedToday.add(handle);api('footprints',{handle}).catch(()=>visitedToday.delete(handle));}
 try{await bootstrap();await refresh();}catch(error){notify(error.message);}
-return {setFilter:f=>{publicFilter=f;drawOwn();},refresh};
+footprints();
+return {visited,setFilter:f=>{publicFilter=f;drawOwn();},refresh};
 }
