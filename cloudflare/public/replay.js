@@ -49,5 +49,5 @@ export function makeReplay(map,shell,{tracks,begin,end}){
   stop.onclick=finish;
   map.on('basemapchanging',()=>{styleReady=false;});
   map.on('style.load',()=>{styleReady=true;if(active)paint();});
-  return {finish,active:()=>active,state:()=>({active,playing,progress}),seek:value=>{if(active){progress=value;paint();}}};
+  return {finish,setAvailable:value=>{if(!value)finish();box.hidden=!value;},active:()=>active,state:()=>({active,playing,progress}),seek:value=>{if(active){progress=value;paint();}}};
 }

@@ -22,14 +22,28 @@ function setCookie(name: string, value: string, url: URL, maxAgeSeconds: number)
   return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secure(url) ? '; Secure' : ''}`;
 }
 async function sessionKey(value?:string):Promise<CryptoKey> {
-  if(!value)throw new Error('SESSION_ENCRYPTION_KEY is not configured');
-  try { const normalized=value.replace(/-/g,'+').replace(/_/g,'/'),padded=normalized.padEnd(Math.ceil(normalized.length/4)*4,'='),bytes=Uint8Array.from(atob(padded),c=>c.charCodeAt(0));if(bytes.length!==32)throw new Error();return await crypto.subtle.importKey('raw',bytes,{name:'AES-GCM'},false,['encrypt','decrypt']); }
-  catch { throw new Error('SESSION_ENCRYPTION_KEY must be a base64url-encoded 32-byte key'); }
+  if(!value)throw new Error('session_key_missing');
+  let bytes:Uint8Array;
+  try { const secret=value.trim(),normalized=secret.replace(/-/g,'+').replace(/_/g,'/'),padded=normalized.padEnd(Math.ceil(normalized.length/4)*4,'=');bytes=Uint8Array.from(atob(padded),c=>c.charCodeAt(0)); }
+  catch { throw new Error('session_key_decode'); }
+  if(bytes.length!==32)throw new Error('session_key_length');
+  try { return await crypto.subtle.importKey('raw',bytes,{name:'AES-GCM'},false,['encrypt','decrypt']); }
+  catch { throw new Error('session_key_import'); }
 }
 export async function encryptIdentity(identity:AuthIdentity,secret:string,now=new Date()):Promise<string>{
-  const iv=crypto.getRandomValues(new Uint8Array(12)),issued=Math.floor(now.getTime()/1000),plain=new TextEncoder().encode(JSON.stringify({...identity,iss:'travelmap',aud:'travelmap-session',iat:issued,exp:issued+SESSION_DAYS*86400}));
-  const encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode('travelmap-session-v1')},await sessionKey(secret),plain);
-  return `v1.${base64url(iv)}.${base64url(encrypted)}`;
+  let iv:Uint8Array;
+  try { iv=crypto.getRandomValues(new Uint8Array(12)); }
+  catch { throw new Error('session_random_generation'); }
+  const issued=Math.floor(now.getTime()/1000);
+  let plain:Uint8Array;
+  try { plain=new TextEncoder().encode(JSON.stringify({...identity,iss:'travelmap',aud:'travelmap-session',iat:issued,exp:issued+SESSION_DAYS*86400})); }
+  catch { throw new Error('session_payload_encode'); }
+  const key=await sessionKey(secret);
+  let encrypted:ArrayBuffer;
+  try { encrypted=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode('travelmap-session-v1')},key,plain); }
+  catch { throw new Error('session_encrypt_operation'); }
+  try { return `v1.${base64url(iv)}.${base64url(encrypted)}`; }
+  catch { throw new Error('session_output_encode'); }
 }
 export async function decryptIdentity(token:string,secret?:string):Promise<AuthIdentity|null>{
   try { const [version,ivText,dataText,...rest]=token.split('.');if(version!=='v1'||!ivText||!dataText||rest.length)return null;
@@ -167,28 +181,43 @@ export async function startGoogleLogin(request: Request, env: AuthEnv): Promise<
 
 export async function finishGoogleLogin(request: Request, env: AuthEnv, fetchToken: typeof fetch = fetch, key?: JWTVerifyGetKey): Promise<Response> {
   const url = new URL(request.url), code = url.searchParams.get('code'), state = url.searchParams.get('state');
+  const observed = async <T>(stage:string, action:()=>Promise<T>):Promise<T> => {
+    try { return await action(); }
+    catch(error) {
+      const errorCode=error instanceof Error&&/^session_(?:key_(?:missing|decode|length|import)|random_generation|payload_encode|encrypt_operation|output_encode)$/.test(error.message)?error.message:'unclassified';
+      console.error(JSON.stringify({event:'login_callback_failed',stage,error_name:error instanceof Error?error.name:'unknown',error_code:errorCode}));
+      throw error;
+    }
+  };
   const flow = cookies(request)[FLOW_COOKIE]?.split('.') ?? [];
   const clearFlow = setCookie(FLOW_COOKIE, '', url, 0);
   const fail = (message: string) => loginErrorPage(400, message, request, {'Set-Cookie': clearFlow});
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) return fail('ログインが設定されていません。');
+  const clientId=env.GOOGLE_CLIENT_ID,clientSecret=env.GOOGLE_CLIENT_SECRET;
   if (url.searchParams.get('error')) return fail('Googleでのログインが完了しませんでした。');
   if (!code || !state || flow.length < 3 || flow[0] !== state) return fail('ログインの手続きが途中で切れました。');
-  const [, nonce, verifier, next] = flow;
-  const tokenResponse = await fetchToken('https://oauth2.googleapis.com/token', {
+  const [, nonce='', verifier='', next] = flow;
+  const tokenResponse = await observed('token_fetch',()=>fetchToken('https://oauth2.googleapis.com/token', {
     method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: new URLSearchParams({code, client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET, redirect_uri: `${url.origin}/auth/callback`, grant_type: 'authorization_code', code_verifier: verifier}),
-  });
+    body: new URLSearchParams({code, client_id: clientId, client_secret: clientSecret, redirect_uri: `${url.origin}/auth/callback`, grant_type: 'authorization_code', code_verifier: verifier}),
+  }));
   if (!tokenResponse.ok) return fail('Googleでの確認に失敗しました。');
-  const tokens = await tokenResponse.json() as {id_token?: string};
-  const claims = tokens.id_token ? await verifyGoogleIdToken(tokens.id_token, env.GOOGLE_CLIENT_ID, nonce, key) : null;
+  const tokens = await observed('token_json',()=>tokenResponse.json()) as {id_token?: string};
+  const claims = tokens.id_token ? await observed('id_token_verify',()=>verifyGoogleIdToken(tokens.id_token!, clientId, nonce, key)) : null;
   if (!claims) return fail('Googleアカウントを確認できませんでした。');
   const identity:AuthIdentity={sub:claims.sub,email:claims.email,name:claims.name,picture:claims.picture};
+  const sessionCookie=await observed('session_encrypt',()=>identityCookie(identity,env,url));
   const headers = new Headers();
   headers.append('Set-Cookie', clearFlow);
-  headers.append('Set-Cookie', await identityCookie(identity,env,url));
+  headers.append('Set-Cookie', sessionCookie);
   const destination=safeNext(decodeURIComponent(next ?? ''));
   try { const user=await upsertGoogleUser(env.DB,claims);headers.set('Location',user.terms_accepted_at?destination:'/signup/');return new Response(null,{status:302,headers}); }
-  catch(error){console.error(JSON.stringify({event:'login_data_unavailable',request_id:crypto.randomUUID()}));return dataUnavailablePage(request,destination,[clearFlow,await identityCookie(identity,env,url)]);}
+  catch(error){
+    console.error(JSON.stringify({event:'login_data_unavailable',request_id:crypto.randomUUID()}));
+    // Authentication and the map shell do not depend on D1. Keep the signed-in cookie and let the map show data as temporarily unavailable.
+    headers.set('Location','/');
+    return new Response(null,{status:302,headers});
+  }
 }
 
 export async function continueGoogleLogin(request:Request,env:AuthEnv):Promise<Response>{

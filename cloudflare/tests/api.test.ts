@@ -178,6 +178,9 @@ test('Google id_token is verified for issuer, audience, nonce and verified email
   const token=cookie.match(/__Host-tm_session=([^;,]+)/)[1];
   const me=await(await handle(new Request('https://travel.test/api/private/me',{headers:{Cookie:encryptedSessionCookieForTest(token)}}),env)).json();
   assert.equal(me.user.email,'new@example.com');assert.match(me.user.handle,/^traveler-[a-f0-9]{6}$/);
+  const broken={...env,DB:{prepare(){throw new Error('D1_ERROR: too many reads');}}};
+  const degraded=await finishGoogleLogin(callback,broken,fakeFetch,key);
+  assert.equal(degraded.status,302);assert.equal(degraded.headers.get('Location'),'/');assert.match(degraded.headers.get('Set-Cookie'),/__Host-tm_session=/);
   assert.equal((await finishGoogleLogin(new Request('https://travel.test/auth/callback?code=abc&state=WRONG',{headers:{Cookie:'tm_oauth=s1.n1.verifier'}}),env,fakeFetch,key)).status,400);
   // owner row pre-created by migration (email only) is claimed by the matching Google account
   await env.DB.prepare("INSERT INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at) VALUES('pre','','pre@example.com','pre','pre',NULL,'2026-01-01T00:00:00Z')").run().catch(()=>{});

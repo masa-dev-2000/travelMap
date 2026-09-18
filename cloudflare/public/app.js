@@ -23,7 +23,9 @@ if(me)groups.push(
 );
 const shell=mapShell(groups);
 if(!me&&!session.authenticated){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.title='Googleアカウントで登録できます';login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'はじめる'}),el('span',{textContent:'/ ログイン'}),el('span',{className:'rail-note',textContent:'Googleアカウントで登録できます'}));shell.fit.after(login);}
-else if(!me&&session.authenticated){const status=el('a',{className:'rail-login',href:'/auth/continue?next=%2F'});status.title='Googleログイン済みです';status.append(el('span',{className:'rail-icon',textContent:'✓'}),el('span',{textContent:'ログイン済み'}),el('span',{className:'rail-note',textContent:'記録データは一時停止中'}));shell.fit.after(status);}
+else if(!me&&session.authenticated){const status=el('div',{className:'rail-login'});status.setAttribute('aria-label','Googleログイン済み');status.append(el('span',{className:'rail-icon',textContent:'✓'}),el('span',{textContent:'ログイン済み'}));shell.fit.after(status);}
+const dataWarning=el('aside',{className:'data-warning',hidden:true});dataWarning.setAttribute('role','status');dataWarning.setAttribute('aria-live','polite');
+dataWarning.append(el('strong',{textContent:'記録データを取得できません'}),el('span',{textContent:session.authenticated?'ログイン済みです。地図は利用できます。':'地図は利用できます。記録は復旧後に表示されます。'}),el('a',{href:'/',textContent:'再読み込み'}));shell.stage.append(dataWarning);
 const map=makeOwnerMap();
 shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの開閉で地図の幅が変わる。続く fit が新しい幅で計算されるよう、その場で合わせる
 const route=makeOwnerRoute(map,shell);
@@ -44,7 +46,8 @@ function playPerson(handle,trip){
 }
 window.__tm={everyone,route,shell,replay,story};// 画面確認用(コンソールから状態を読む)
 await everyone.ready;
-if(!everyone.count())notify('いま旅に出ている人はいません');
+const dataAvailable=session.data_available!==false&&everyone.available();dataWarning.hidden=dataAvailable;replay.setAvailable(dataAvailable);
+if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいません');
 const shared=new URLSearchParams(location.search);
 if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});}
 else if(!shared.get('play'))fitRecords();

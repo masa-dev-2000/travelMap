@@ -9,7 +9,7 @@ const PERIODS=[['7','1週間'],['30','1か月'],['90','3か月'],['all','全期�
 const jstToday=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
 const daysBefore=(date,n)=>new Date(Date.parse(date+'T00:00:00Z')-n*86400000).toISOString().slice(0,10);
 export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFilter,onOpenPerson,onPlay}){
-  let people=[],everyone=[],markers=new Map(),styleReady=false,self=null,entries=[],shown=[],on=true,loaded=false,period='7',preset='7';
+  let people=[],everyone=[],markers=new Map(),styleReady=false,self=null,entries=[],shown=[],on=true,loaded=false,failed=false,period='7',preset='7';
   try{const saved=localStorage.getItem('travelmap.period');if(PERIODS.some(([key])=>key===saved))period=preset=saved;}catch{}
   if(showToggle)try{on=localStorage.getItem('travelmap.friends')!=='off';}catch{}
   const toggle=el('button',{className:'friends-toggle',type:'button',textContent:'みんな',hidden:!showToggle});shell.stage.append(toggle);
@@ -81,9 +81,9 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   function apply(notify=true){
     shown=entries.filter(entry=>(!personSelect.value||entry.author===personSelect.value)&&(!tripSelect.value||entry.trip_name===tripSelect.value)&&(!catSelect.value||entry.category_name===catSelect.value)&&within(entry));
     const spent=shown.reduce((sum,entry)=>sum+(entry.spent_jpy??0),0),paid=shown.filter(entry=>entry.spent_jpy!=null).length;
-    totals.textContent=(shown.length?`${shown.length}件 · `:'')+(paid?`この条件の支出 ${yen(spent)}（${paid}件）`:shown.length?'この条件に支出はありません':'この条件の記録はありません。'+(entries.length&&period!=='all'?'期間を広げると表示されます。':''));
+    totals.textContent=failed?'記録データを取得できません。':(shown.length?`${shown.length}件 · `:'')+(paid?`この条件の支出 ${yen(spent)}（${paid}件）`:shown.length?'この条件に支出はありません':'この条件の記録はありません。'+(entries.length&&period!=='all'?'期間を広げると表示されます。':''));
     list.replaceChildren();listed=0;renderList();
-    if(!self)shell.count.textContent='公開記録 '+countText(shown.length,entries.length);
+    if(!self)shell.count.textContent=failed?'公開記録 取得できません':'公開記録 '+countText(shown.length,entries.length);
     group();renderPeople();if(notify)onFilter?.(state());
   }
   function renderPeople(){
@@ -126,7 +126,7 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   toggle.onclick=()=>{on=!on;try{localStorage.setItem('travelmap.friends',on?'on':'off');}catch{}show();};
   map.on('basemapchanging',()=>{styleReady=false;});
   map.on('style.load',()=>{styleReady=true;draw();});
-  const ready=(async()=>{try{const response=await fetch('/api/public/entries');if(!response.ok)throw new Error('記録を読み込めませんでした。');entries=(await response.json()).entries||[];}catch(error){totals.textContent=error.message;}loaded=true;setup();apply(false);renderPeople();})();
+  const ready=(async()=>{try{const response=await fetch('/api/public/entries');if(!response.ok)throw new Error('記録を読み込めませんでした。');entries=(await response.json()).entries||[];}catch{failed=true;}loaded=true;setup();apply(false);renderPeople();})();
   renderPeople();show();
   // 旅の再生の選択肢(公開フィードだけから作る): 旅ごと・表示中の期間・すべて。trip は共有URL用('' = すべて)
   function storyOptions(handle){
@@ -138,7 +138,7 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
     if(period!=='all'&&inPeriod.length&&inPeriod.length<mine.length)options.push(option(PERIOD_LABEL[period],inPeriod,undefined));
     options.push(option('すべての公開記録',mine,''));return options;
   }
-  return {ready,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
+  return {ready,available:()=>!failed,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){failed=false;entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
     points:()=>on?people.flatMap(p=>(p.rows.length?p.rows:[p.last]).map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,shownCount:()=>shown.length,countText,filter:state,
     tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.at||r.date+'T12:00:00+09:00')})),marker:markers.get(p.author)})):[],
     setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
