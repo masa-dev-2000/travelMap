@@ -1,7 +1,14 @@
-# Cloudflare公開準備
+# Cloudflare版 TravelMap
 
-新しいTravelMap画面・Workers API・D1移行処理。既存Firebase画面は変更していない。
-新アカウントの特定・リソース作成・Access設定・本番投入・公開は未実施。
+本番は `https://travelmap.life-log-b97.workers.dev`（Worker `travelmap`、D1 `travelmap`、非公開R2 `travelmap-files`）。
+Google OIDCで認証し、7日間の認証付き暗号化Cookieでログイン状態を保持する。D1障害時も認証と地図画面は利用でき、
+D1由来の記録・プロフィールだけを一時停止として表示する。私的APIは503 `data_unavailable` を返す。
+
+地図は1画面構成。SP下部ナビは「みんな／タイムライン／記録／じぶん」で、期間・件数を上部、全体表示と地図種類を
+地図上の補助操作として表示する。2026-09-18時点の本番Versionは `f9c82219-6386-4866-ad1d-665ce51959c1`、
+対応commitは `24a167f`。
+
+以下のPhase記録は初回移行時の手順・履歴として残す。
 
 ## Phase 1：ローカルで確認する
 
