@@ -11,7 +11,7 @@ original_cases = [
     'BrowserTests.test_stories_mute_selection_and_unread',
     'BrowserTests.test_compact_controls_at_mobile_widths',
     'BrowserTests.test_obscured_card_is_not_marked_read',
-    'BrowserTests.test_self_shared_url_stays_public_only',
+    'BrowserTests.test_self_shared_url_stays_public_only','BrowserTests.test_play_during_profile_bootstrap',
 ]
 checks = [
     ('browser-smoke.py', original_cases, '1'),

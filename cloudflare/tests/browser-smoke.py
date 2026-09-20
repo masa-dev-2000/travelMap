@@ -247,4 +247,31 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.read_posts,[])
         p.evaluate("document.querySelector('#test-cover').remove();__tm.player.pause();__tm.player.resume();")
         p.wait_for_timeout(900);self.assertGreater(len(self.read_posts),0)
+    def test_play_during_profile_bootstrap(self):
+        # Deliberately interleave private-panel startup and the first Play fetch.
+        # No forced clicks or longer global timeout: reproduce the cancellation.
+        p=self.page;activities=[];feeds=[];feed_calls=[]
+        def hold(route):
+            path=urlparse(route.request.url).path
+            if path=='/api/private/activities':activities.append(route);return
+            if path=='/api/private/viewer-feed':
+                feed_calls.append(route.request.url)
+                if len(feed_calls)==2:feeds.append(route);return
+            self.api(route)
+        p.route('**/api/**',hold);p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        for _ in range(100):
+            if activities:break
+            p.wait_for_timeout(20)
+        self.assertTrue(activities)
+        p.evaluate('void __tm.playback.play()')
+        for _ in range(100):
+            if feeds:break
+            p.wait_for_timeout(20)
+        self.assertTrue(feeds)
+        self.api(activities.pop())
+        expect(p.locator('.auto-location')).to_be_visible()
+        self.assertEqual(len(feed_calls),2,'Private startup must not replace the pending Play feed')
+        self.api(feeds.pop());p.wait_for_function('__tm.player.active()')
+        self.assertEqual(p.evaluate('__tm.player.state().author'),'friend')
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -114,7 +114,7 @@ async function transactions(reset=true){
   transactionOffset=data.next_offset;$('#more-transactions').hidden=transactionOffset===null;
   if(reset&&!data.transactions.length)$('#transactions').append(el('p',{textContent:'この期間の取引はありません。'}));
 }
-async function refresh(){await Promise.all([summary(),activities(),transactions()]);everyone.reload();}
+async function refresh(){await Promise.all([summary(),activities(),transactions()]);await everyone.reload();}
 function bindForm(selector,path,build,after){
   const form=$(selector);let lastBody='',key=crypto.randomUUID();
   form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type=submit],button:not([type])');button.disabled=true;
@@ -253,7 +253,9 @@ async function footprints(){
 shell.drawer.addEventListener('viewchange',async event=>{if(event.detail==='profile'&&shell.button('profile').classList.contains('rail-dot')){try{await api('footprints/seen',{});shell.button('profile').classList.remove('rail-dot');}catch{}}});
 const visitedToday=new Set();
 function visited(handle){if(visitedToday.has(handle))return;visitedToday.add(handle);api('footprints',{handle}).catch(()=>visitedToday.delete(handle));}
-try{await bootstrap();await refresh();}catch(error){notify(error.message);}
+// app.js has already loaded the viewer feed. A redundant startup reload could
+// cancel the user's first playback request while private panels finish loading.
+try{await bootstrap();await Promise.all([summary(),activities(),transactions()]);}catch(error){notify(error.message);}
 footprints();
 return {visited,setFilter:f=>{publicFilter=f;drawOwn();},refresh};
 }
