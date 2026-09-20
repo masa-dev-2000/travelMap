@@ -22,3 +22,6 @@ __pycache__/
 # 作業の申し送りはローカルだけに置く
 /HANDOFF.md
 /.agent-handoff/
+
+# Local/CI diagnostics; never publish account data or screenshots as source.
+/test-artifacts/

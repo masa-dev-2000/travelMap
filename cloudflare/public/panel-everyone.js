@@ -1,147 +1,100 @@
-import {el, whoMarker, yen, ago, statusLine} from './shared.js';
+import {el,ago,whoMarker} from './shared.js';
 import {gl} from './owner-map.js';
 import {publicPoint} from './record-display.js';
 import {mapRecordCard} from './map-record-card.js';
-// みんなの公開記録: 旅モード中の人の一覧・タイムライン(絞り込み)・地図の線とアイコン。データは公開フィードだけ(非公開データは扱わない)
-const HUES=[24,265,330,205,95,48,0,168];
-const day=text=>new Date(text+'T00:00:00+09:00').toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'});
+import {withinPeriod} from './viewer-state.js';
 export {ago};
-// 表示する期間。既定は「この1週間」(今日を含む過去7日、JST)。選んだプリセットは端末に覚える
-const PERIODS=[['7','1週間'],['30','1か月'],['90','3か月'],['all','全期間']],PERIOD_LABEL={7:'この1週間',30:'この1か月',90:'この3か月',all:'全期間',custom:'この期間'};
-const jstToday=()=>new Date().toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'});
-const daysBefore=(date,n)=>new Date(Date.parse(date+'T00:00:00Z')-n*86400000).toISOString().slice(0,10);
-export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFilter,onOpenPerson,onPlay}){
-  let people=[],everyone=[],markers=new Map(),styleReady=false,self=null,entries=[],shown=[],on=true,loaded=false,failed=false,period='7',preset='7';
-  try{const saved=localStorage.getItem('travelmap.period');if(PERIODS.some(([key])=>key===saved))period=preset=saved;}catch{}
-  if(showToggle)try{on=localStorage.getItem('travelmap.friends')!=='off';}catch{}
-  const toggle=el('button',{className:'friends-toggle',type:'button',textContent:'みんな',hidden:!showToggle});shell.stage.append(toggle);
-  const note=el('span',{className:'friends-count'});shell.count.after(note);
-  const periodSelect=el('select',{id:'period-filter'}),chip=el('select',{className:'period-chip'});chip.setAttribute('aria-label','表示する期間');note.after(chip);
-  for(const node of [periodSelect,chip]){for(const [key,label] of PERIODS)node.append(new Option(node===chip?PERIOD_LABEL[key]:label,key));node.append(new Option(node===chip?'期間指定…':'日付を指定','custom'));}
-  const cards=mapRecordCard(map,shell),popup={remove:()=>cards.hide()};
-  // タイムラインの絞り込み
-  const filters=el('div',{className:'filters'}),personSelect=el('select',{id:'person-filter'}),tripSelect=el('select',{id:'public-trip-filter'}),catSelect=el('select',{id:'cat-filter'}),fromInput=el('input',{type:'date'}),toInput=el('input',{type:'date'});
-  const totals=el('p',{className:'totals'}),reset=el('button',{type:'button',className:'reset',textContent:'全期間に戻す'}),legend=el('div',{className:'legend'}),list=el('div',{className:'cards',id:'entries'}),more=el('button',{type:'button',textContent:'さらに表示',hidden:true});
-  for(const [label,node] of [['期間',periodSelect],['人',personSelect],['旅',tripSelect],['カテゴリ',catSelect],['開始',fromInput],['終了',toInput]]){const wrap=el('label');wrap.append(el('span',{textContent:label}),node);filters.append(wrap);}
-  filters.append(reset,totals,legend);timelineNode.append(filters,list,more);
-  const hueOf=author=>HUES[Math.max(0,everyone.indexOf(author))%HUES.length];
-  const lines=()=>{
-    const stamps=people.flatMap(p=>p.rows.map(r=>Date.parse(r.date))),first=stamps.length?Math.min(...stamps):0,span=Math.max(1,Math.max(...stamps)-first),features=[];
-    for(const p of people)for(let i=1;i<p.rows.length;i++){const t=((Date.parse(p.rows[i-1].date)+Date.parse(p.rows[i].date))/2-first)/span;
-      features.push({type:'Feature',geometry:{type:'LineString',coordinates:[[p.rows[i-1].longitude,p.rows[i-1].latitude],[p.rows[i].longitude,p.rows[i].latitude]]},properties:{color:`hsl(${p.hue} ${55+30*t}% ${62-24*t}%)`,opacity:+(.15+.8*t).toFixed(3)}});}
-    return {type:'FeatureCollection',features};
-  };
-  let override=null;// リプレイ中は外から線のデータを差し替える
+const COLORS=['#a95013','#6934b5','#ba376f','#287495','#698326','#7b6318'];
+const LABELS={7:'1週間',30:'1か月',90:'3か月',all:'全期間',custom:'期間指定'};
+const located=e=>Number.isFinite(e.latitude)&&Number.isFinite(e.longitude);
+export const publicStep=e=>({id:e.id,publicEntryId:e.id,publication_seq:e.publication_seq,author:e.author,source:'public',date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos||[],lng:e.longitude,lat:e.latitude});
+export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{},onOpenPerson=()=>{},onPlay=()=>{},onRead=()=>{},notify=()=>{}}){
+  let failed=false,loaded=false,loading=0,request=null,replaying=false,styleReady=false,markers=[],groups=[];
+  const cards=mapRecordCard(map,shell),anonymousOrder=new Map();let nextAnonSeq=0;
+  const chip=el('select',{className:'period-chip'});chip.setAttribute('aria-label','表示する期間');
+  for(const [value,label] of Object.entries(LABELS))chip.append(new Option(label,value));shell.heading.append(chip);
+  const selection=el('button',{className:'selected-person',type:'button',hidden:true});selection.onclick=()=>state.select(null);shell.heading.append(selection);
+  const color=handle=>COLORS[[...handle].reduce((a,c)=>a+c.charCodeAt(0),0)%COLORS.length];
+  function filter(){const s=state.state();return {person:s.selectedUser||'',period:s.period.preset,from:s.period.from,to:s.period.to,active:!!(s.selectedUser||s.period.from||s.period.to),trip:'',category:''};}
+  function visibleGroups(s=state.state()){
+    return s.users.filter(u=>!s.selectedUser||u.handle===s.selectedUser).map(user=>{
+      const all=s.entries.filter(e=>e.author===user.handle),rows=all.filter(e=>withinPeriod(e,s.period)).sort((a,b)=>a.date.localeCompare(b.date)||(a.at||'').localeCompare(b.at||'')||a.publication_seq-b.publication_seq);
+      const points=rows.filter(located),last=points.at(-1)||(!s.selectedUser?all.filter(located).sort((a,b)=>a.date.localeCompare(b.date)).at(-1):null);
+      return {user,rows,points,last};
+    });
+  }
   function draw(){
-    if(!styleReady)return;
-    const data=override||(on?lines():{type:'FeatureCollection',features:[]});
+    if(!styleReady)return;const features=[];
+    if(!replaying)for(const g of groups)for(let i=1;i<g.points.length;i++)features.push({type:'Feature',geometry:{type:'LineString',coordinates:[[g.points[i-1].longitude,g.points[i-1].latitude],[g.points[i].longitude,g.points[i].latitude]]},properties:{color:color(g.user.handle)}});
+    const data={type:'FeatureCollection',features};
     if(map.getSource('friends-segments'))map.getSource('friends-segments').setData(data);else map.addSource('friends-segments',{type:'geojson',data});
-    if(!map.getLayer('friends-line'))map.addLayer({id:'friends-line',type:'line',source:'friends-segments',paint:{'line-color':['get','color'],'line-width':self?1.5:2.5,'line-opacity':['get','opacity']},layout:{'line-cap':'round'}},map.getLayer('travel-line')?'travel-line':undefined);
+    if(!map.getLayer('friends-line'))map.addLayer({id:'friends-line',type:'line',source:'friends-segments',paint:{'line-color':['get','color'],'line-width':2,'line-opacity':.7},layout:{'line-cap':'round','line-join':'round'}});
   }
-  function openEntry(entry){
-    if(!shown.some(r=>r.id===entry.id)){personSelect.value=entry.author;tripSelect.value='';catSelect.value='';setPeriod('all');apply();}
-    while(listed<shown.length&&!document.getElementById('entry-'+entry.id))renderList();
-    shell.open('timeline');document.getElementById('entry-'+entry.id)?.scrollIntoView({block:'start'});
+  function detail(entry){
+    const article=el('article',{className:'record-detail'});
+    article.append(el('time',{textContent:entry.at?new Date(entry.at).toLocaleString('ja-JP'):entry.date}),el('h2',{textContent:entry.place_name||'旅のひとこま'}),el('p',{className:'memo',textContent:entry.memo||''}));
+    for(const photo of entry.photos||[]){if(/^\/api\/public\/photos\/[a-z0-9-]+$/.test(photo.url||''))article.append(el('img',{src:photo.url,alt:photo.caption||'旅の写真',loading:'lazy'}));}
+    shell.view('record',article,'記録の詳細');
+    if(!document.hidden)void Promise.resolve(onRead(publicStep(entry))).catch(e=>notify(e.message));
   }
-  function detail(p){
-    const last=p.recent.at(-1),point=publicPoint(last);if(!point)return;
-    cards.show(point,{openDetail:()=>openEntry(last),extra:{label:'▶ 旅を再生',action:()=>onPlay?.(p.author)},note:p.stale?'この期間の記録はありません。最後の公開記録を表示しています':''});
-    if(p.author!==self)onOpenPerson?.(p.author);
+  function showEntry(entry){
+    const point=publicPoint(entry);if(!point){detail(entry);return;}
+    cards.show(point,{openDetail:()=>detail(entry),extra:{label:'この人の記録を再生',action:()=>{state.select(entry.author);onPlay(entry.author);}},onPresented:()=>{
+      setTimeout(()=>{if(cards.visible(point.key))void Promise.resolve(onRead(publicStep(entry))).catch(e=>notify(e.message));},400);
+    }});onOpenPerson(entry.author);
   }
-  function show(){
-    markers.forEach(m=>m.remove());markers.clear();popup.remove();
-    if(on)for(const p of people){const last=p.last,button=el('button',{type:'button',className:'who-button friend-marker'});button.dataset.handle=p.author;
-      button.append(whoMarker({image:last.author_icon_url,icon:last.author_icon,avatar:last.author_avatar,name:p.name,caption:p.name+' '+day(last.date),status:statusLine(last.author_status,last.author_status_at)||[last.category_name,ago(last)].filter(Boolean).join(' · '),color:`hsl(${p.hue} 70% 35%)`}));button.onclick=event=>{event.stopPropagation();detail(p);};
-      const pinEl=el('div',{className:p.stale?'who-pin stale':'who-pin'});pinEl.append(button);// 外側は素の要素(all:unset のボタンを直接渡すと位置がずれる)
-      markers.set(p.author,new gl.Marker({element:pinEl,anchor:'center'}).setLngLat([last.longitude,last.latitude]).addTo(map));}
-    toggle.setAttribute('aria-pressed',String(on));note.textContent=on&&people.length?` · みんな ${people.length}人`:'';draw();
-  }
-  const located=rows=>rows.filter(e=>e.latitude!=null&&e.longitude!=null).reverse().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
-  // 地図に描く人(自分以外。自分の線は自分用の経路が描く)。期間内に記録が無い人は線を出さず、最新地点のマーカーだけ薄く出す(旅・カテゴリで絞り込んでいる間は出さない)
-  function group(){
-    const authors=everyone.filter(author=>author!==self&&(!personSelect.value||personSelect.value===author)),ghosts=!tripSelect.value&&!catSelect.value;
-    people=authors.map(author=>{const rows=located(shown.filter(e=>e.author===author)),all=rows.length||!ghosts?rows:located(entries.filter(e=>e.author===author));
-      return all.length?{author,name:all.at(-1).author_name||author,hue:hueOf(author),rows,recent:all,last:all.at(-1),stale:!rows.length}:null;}).filter(Boolean);show();
-  }
-  function card(entry){
-    const article=el('article',{className:'card',id:'entry-'+entry.id});
-    article.append(el('p',{className:'eyebrow',textContent:[entry.date,entry.author_name,entry.category_name,entry.trip_name].filter(Boolean).join('・')}),el('h2',{textContent:entry.place_name||'旅のひとこま'}));
-    if(entry.spent_jpy!=null)article.append(el('p',{className:'spent',textContent:yen(entry.spent_jpy)}));
-    article.append(el('p',{className:'memo',textContent:entry.memo}));
-    for(const photo of entry.photos)article.append(el('img',{src:photo.url,alt:photo.caption||'旅の写真',loading:'lazy'}));
-    if(entry.latitude!=null){const go=el('button',{type:'button',className:'card-go',textContent:'地図で見る'});go.onclick=()=>{if(innerWidth<=700)shell.hide();map.flyTo({center:[entry.longitude,entry.latitude],zoom:Math.max(map.getZoom(),12)});};article.append(go);}
-    return article;
-  }
-  let listed=0;
-  function renderList(){const next=shown.slice(listed,listed+60);list.append(...next.map(card));listed+=next.length;more.hidden=listed>=shown.length;}
-  more.onclick=renderList;
-  const state=()=>({person:personSelect.value,trip:tripSelect.value,category:catSelect.value,from:fromInput.value,to:toInput.value,period,active:!!(personSelect.value||tripSelect.value||catSelect.value||fromInput.value||toInput.value)});
-  const within=entry=>(!fromInput.value||entry.date>=fromInput.value)&&(!toInput.value||entry.date<=toInput.value);
-  // 件数の表示: 「この1週間 n件 / 全 m件」。期間以外でも絞っていれば「この条件」
-  const countText=(n,m)=>!state().active?`全 ${m}件`:`${personSelect.value||tripSelect.value||catSelect.value?'この条件':PERIOD_LABEL[period]} ${n}件 / 全 ${m}件`;
-  function setPeriod(next,save=true){period=next;if(next!=='custom'){preset=next;const today=jstToday();fromInput.value=next==='all'?'':daysBefore(today,Number(next)-1);toInput.value=next==='all'?'':today;if(save)try{localStorage.setItem('travelmap.period',next);}catch{}}periodSelect.value=chip.value=next;}
-  function apply(notify=true){
-    shown=entries.filter(entry=>(!personSelect.value||entry.author===personSelect.value)&&(!tripSelect.value||entry.trip_name===tripSelect.value)&&(!catSelect.value||entry.category_name===catSelect.value)&&within(entry));
-    const spent=shown.reduce((sum,entry)=>sum+(entry.spent_jpy??0),0),paid=shown.filter(entry=>entry.spent_jpy!=null).length;
-    totals.textContent=failed?'記録データを取得できません。':(shown.length?`${shown.length}件 · `:'')+(paid?`この条件の支出 ${yen(spent)}（${paid}件）`:shown.length?'この条件に支出はありません':'この条件の記録はありません。'+(entries.length&&period!=='all'?'期間を広げると表示されます。':''));
-    list.replaceChildren();listed=0;renderList();
-    if(!self)shell.count.textContent=failed?'公開記録 取得できません':'公開記録 '+countText(shown.length,entries.length);
-    group();renderPeople();if(notify)onFilter?.(state());
-  }
-  function renderPeople(){
-    peopleNode.replaceChildren();
-    if(!loaded){peopleNode.append(el('p',{className:'hint',textContent:'読み込み中…'}));return;}
-    if(!everyone.length){peopleNode.append(el('p',{className:'empty-note',textContent:'いま旅に出ている人はいません'}),el('p',{className:'hint',textContent:'旅モードをオンにした人が、ここと地図に表示されます。'}));return;}
-    const rows=everyone.map(author=>{const mine=entries.filter(e=>e.author===author);return {author,latest:mine[0],all:mine,rows:located(mine)};}).sort((a,b)=>(b.latest.at||b.latest.date)<(a.latest.at||a.latest.date)?-1:1);
-    for(const person of rows){
-      const last=person.latest,button=el('button',{type:'button',className:'person-row'});button.dataset.handle=person.author;
-      const face=whoMarker({image:last.author_icon_url,icon:last.author_icon,avatar:last.author_avatar,name:last.author_name,color:`hsl(${hueOf(person.author)} 70% 35%)`});
-      const text=el('span',{className:'person-text'});const fresh=person.all.some(within),status=statusLine(last.author_status,last.author_status_at);button.classList.toggle('stale',!fresh);
-      text.append(el('strong',{textContent:(last.author_name||person.author)+(person.author===self?'（あなた）':'')}));if(status)text.append(el('span',{className:'person-status',textContent:status}));
-      text.append(el('span',{textContent:fresh?[last.place_name||'旅のひとこま',ago(last)].join(' · '):'最後の記録: '+[ago(last),last.place_name].filter(Boolean).join(' · ')}));
-      button.append(face,text);
-      button.onclick=()=>{
-        const spot=person.rows.at(-1);
-        if(personSelect.value&&personSelect.value!==person.author){personSelect.value='';apply();}
-        if(!on&&person.author!==self){on=true;show();}
-        if(innerWidth<=700)shell.hide();
-        if(spot){map.flyTo({center:[spot.longitude,spot.latitude],zoom:Math.max(map.getZoom(),10)});detail({author:person.author,name:last.author_name||person.author,rows:person.rows,recent:person.rows,stale:!person.all.some(within)});}
-        else{personSelect.value=person.author;apply();shell.open('timeline');}
-      };
-      const row=el('div',{className:'person-line'}),playButton=el('button',{type:'button',className:'person-play',textContent:'▶'});playButton.setAttribute('aria-label',(last.author_name||person.author)+'の旅を再生');playButton.onclick=()=>onPlay?.(person.author);
-      row.append(button,playButton);peopleNode.append(row);
+  function render(s,reason){
+    chip.value=s.period.preset;
+    const user=s.users.find(u=>u.handle===s.selectedUser);
+    selection.hidden=!user;selection.textContent=user?user.display_name+' ×':'';selection.setAttribute('aria-label','人物の選択を解除');
+    const count=s.entries.filter(e=>(!s.selectedUser||e.author===s.selectedUser)&&withinPeriod(e,s.period)).length;
+    shell.count.textContent=failed?'取得できません':`${count}件`;
+    if(reason==='read')return;
+    if(['selection','period','mute','identity','error'].includes(reason))cards.hide();
+    groups=visibleGroups(s);markers.forEach(m=>m.remove());markers=[];
+    if(!replaying)for(const g of groups){if(!g.last)continue;const button=el('button',{type:'button',className:'who-button friend-marker'});button.dataset.handle=g.user.handle;button.setAttribute('aria-label',g.user.display_name+'の記録');
+      button.append(whoMarker({image:g.user.icon_url,icon:g.user.icon,avatar:g.user.avatar_url,name:g.user.display_name,caption:g.user.display_name,color:color(g.user.handle)}));
+      button.onclick=event=>{event.stopPropagation();state.select(g.user.handle);showEntry(g.last);};
+      const node=el('div',{className:'who-pin'});node.append(button);markers.push(new gl.Marker({element:node}).setLngLat([g.last.longitude,g.last.latitude]).addTo(map));
     }
+    draw();if(['selection','period','mute','identity','feed'].includes(reason))onFilter(filter());
   }
-  function setup(){
-    const trips=[...new Set(entries.filter(entry=>entry.trip_name).map(entry=>entry.trip_name))];
-    everyone=[...new Set(entries.map(entry=>entry.author))].sort();
-    personSelect.replaceChildren(new Option('みんな',''));legend.replaceChildren();
-    for(const author of everyone){const name=entries.find(entry=>entry.author===author).author_name;personSelect.append(new Option(name,author));const chip=el('span',{className:'who',textContent:name});chip.style.setProperty('--c',`hsl(${hueOf(author)} 70% 40%)`);legend.append(chip);}
-    tripSelect.replaceChildren(new Option('すべての記録',''));for(const name of trips)tripSelect.append(new Option(name,name));tripSelect.closest('label').hidden=!trips.length;
-    catSelect.replaceChildren(new Option('すべて',''));for(const name of [...new Set(entries.map(entry=>entry.category_name).filter(Boolean))])catSelect.append(new Option(name,name));
-    setPeriod(period,false);
+  const subscription=state.subscribe(render);
+  chip.onchange=()=>{
+    if(chip.value!=='custom'){state.setPeriod(chip.value);try{localStorage.setItem('travelmap.period',chip.value);}catch{}return;}
+    const s=state.state(),form=el('form',{className:'form-grid'}),from=el('input',{type:'date',value:s.period.from,required:true}),to=el('input',{type:'date',value:s.period.to,required:true}),save=el('button',{textContent:'この期間を表示'});
+    from.setAttribute('aria-label','期間の開始日');to.setAttribute('aria-label','期間の終了日');form.append(from,to,save);
+    form.onsubmit=event=>{event.preventDefault();try{state.setPeriod('custom',from.value,to.value);shell.hide();}catch(e){notify(e.message);}};
+    chip.value=s.period.preset;shell.view('period',form,'表示する期間');
+  };
+  function cancelReload(){loading++;request?.abort();request=null;}
+  async function reload({signal}={}){
+    const run=++loading;request?.abort();request=new AbortController();const controller=request,cancel=()=>controller.abort();signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)controller.abort();
+    try{
+      const response=await fetch(authenticated?'/api/private/viewer-feed':'/api/public/entries',{signal:controller.signal,cache:'no-store'});
+      const data=await response.json();if(authenticated&&[401,403].includes(response.status))document.dispatchEvent(new Event('tm:auth-lost'));if(!response.ok)throw new Error(data.error||'人物情報を取得できません');if(run!==loading||signal?.aborted)return false;
+      if(!authenticated){
+        if(!Array.isArray(data.entries))throw new Error('公開記録の応答を確認できません');
+        for(const e of data.entries.slice().reverse())if(!anonymousOrder.has(e.id))anonymousOrder.set(e.id,++nextAnonSeq);
+        data.entries=data.entries.map(e=>({...e,publication_seq:anonymousOrder.get(e.id),unread:true}));data.muted=[];data.self=null;
+      }
+      failed=false;loaded=true;state.replaceFeed(data);return true;
+    }catch(e){if(run===loading&&e.name!=='AbortError'){failed=true;state.fail(e.message);notify(e.message);}return false;}
+    finally{signal?.removeEventListener('abort',cancel);}
   }
-  tripSelect.onchange=()=>{if(tripSelect.value){const dated=entries.filter(entry=>entry.trip_name===tripSelect.value).map(entry=>entry.date).sort();setPeriod('custom');fromInput.value=dated[0]??'';toInput.value=dated.at(-1)??'';}else setPeriod(preset);apply();};
-  catSelect.onchange=personSelect.onchange=()=>apply();fromInput.onchange=toInput.onchange=()=>{setPeriod('custom');apply();};
-  periodSelect.onchange=chip.onchange=event=>{const next=event.target.value;setPeriod(next);if(next==='custom')shell.open('timeline');else apply();};
-  reset.onclick=()=>{personSelect.value='';tripSelect.value='';catSelect.value='';setPeriod('all');apply();};
-  toggle.onclick=()=>{on=!on;try{localStorage.setItem('travelmap.friends',on?'on':'off');}catch{}show();};
-  map.on('basemapchanging',()=>{styleReady=false;});
-  map.on('style.load',()=>{styleReady=true;draw();});
-  const ready=(async()=>{try{const response=await fetch('/api/public/entries');if(!response.ok)throw new Error('記録を読み込めませんでした。');entries=(await response.json()).entries||[];}catch{failed=true;}loaded=true;setup();apply(false);renderPeople();})();
-  renderPeople();show();
-  // 旅の再生の選択肢(公開フィードだけから作る): 旅ごと・表示中の期間・すべて。trip は共有URL用('' = すべて)
   function storyOptions(handle){
-    const mine=entries.filter(e=>e.author===handle).reverse().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);if(!mine.length)return [];
-    const latest=mine.at(-1),name=latest.author_name||handle,color=`hsl(${hueOf(handle)} 70% 38%)`,face={image:latest.author_icon_url,icon:latest.author_icon,avatar:latest.author_avatar,name};
-    const steps=rows=>rows.map(e=>({date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos,lng:e.longitude,lat:e.latitude}));
-    const option=(label,rows,trip)=>({label,trip,note:`${day(rows[0].date)}〜${day(rows.at(-1).date)} · ${rows.length}件`,load:async()=>({title:trip?`${name}・${trip}`:`${name}の旅`,steps:steps(rows),face,color,shareUrl:trip===undefined?null:'/?play='+encodeURIComponent(handle)+(trip?'&trip='+encodeURIComponent(trip):'')})});
-    const options=[...new Set(mine.map(e=>e.trip_name).filter(Boolean))].map(trip=>option(trip,mine.filter(e=>e.trip_name===trip),trip)),inPeriod=mine.filter(within);
-    if(period!=='all'&&inPeriod.length&&inPeriod.length<mine.length)options.push(option(PERIOD_LABEL[period],inPeriod,undefined));
-    options.push(option('すべての公開記録',mine,''));return options;
+    const s=state.state();if(!state.visible(handle))return [];const rows=s.entries.filter(e=>e.author===handle).sort((a,b)=>a.date.localeCompare(b.date)||(a.at||'').localeCompare(b.at||'')||a.publication_seq-b.publication_seq),user=s.users.find(u=>u.handle===handle);if(!rows.length||!user)return [];
+    const option=(label,source,trip)=>({label,trip,load:async()=>groupData({user,rows:source})});
+    const result=[...new Set(rows.map(e=>e.trip_name).filter(Boolean))].map(trip=>option(trip,rows.filter(e=>e.trip_name===trip),trip));
+    result.push(option('すべての公開記録',rows,''));return result;
   }
-  return {ready,available:()=>!failed,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){failed=false;entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
-    points:()=>on?people.flatMap(p=>(p.rows.length?p.rows:[p.last]).map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,shownCount:()=>shown.length,countText,filter:state,
-    tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>{const point=publicPoint(r);return point?{...point,openDetail:()=>openEntry(r)}:null;}).filter(Boolean),marker:markers.get(p.author)})):[],
-    setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
+  function groupData({user,rows}){
+    return {title:user.display_name+'の記録',author:user.handle,source:'public',steps:rows.map(publicStep),face:{image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name},color:color(user.handle)};
+  }
+  map.on('basemapchanging',()=>{styleReady=false;});map.on('style.load',()=>{styleReady=true;draw();});
+  render(state.state(),'init');const ready=reload();
+  return {ready,reload,cancelReload,groupData,storyOptions,detail,showEntry,available:()=>!failed,count:()=>state.state().users.length,shownCount:()=>groups.reduce((n,g)=>n+g.rows.length,0),filter,
+    countText:(n,m)=>`${n}件 / 全${m}件`,setSelf:handle=>state.setSelf(handle),selectPerson:handle=>state.select(handle),
+    points:()=>groups.flatMap(g=>(g.points.length?g.points:g.last?[g.last]:[]).map(e=>[e.longitude,e.latitude])),
+    setReplay:value=>{replaying=value;if(value){markers.forEach(m=>m.remove());markers=[];}else render(state.state(),'replay-end');draw();},destroy(){request?.abort();subscription();markers.forEach(m=>m.remove());}};
 }

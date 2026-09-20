@@ -2,7 +2,7 @@ import {el} from './shared.js';
 
 // groups: {id,label,icon,nodes,action?,small?}. action() が true を返したらドロワーを開かない(別ページへの移動など)
 export function mapShell(groups) {
-  const css=el('link',{rel:'stylesheet',href:'/map-shell.css'});document.head.append(css);
+  const css=el('link',{rel:'stylesheet',href:'/map-shell.css'});document.head.insertBefore(css,document.querySelector('link[data-travelmap-issues]'));
   document.body.classList.add('map-app');
   const mapNode=document.querySelector('#map'),message=document.querySelector('#message');
   const stage=el('main',{className:'map-stage'}),rail=el('nav',{className:'map-rail'});
@@ -21,7 +21,7 @@ export function mapShell(groups) {
     if(!panels.has(id))return;
     for(const [key,node] of panels)node.hidden=key!==id;
     for(const [key,button] of buttons){button.classList.toggle('active',key===id);button.setAttribute('aria-expanded',String(key===id));}
-    active=id;title.textContent=titles.get(id)||groups.find(g=>g.id===id).title||groups.find(g=>g.id===id).label;drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
+    active=id;title.textContent=titles.get(id)||groups.find(g=>g.id===id)?.title||groups.find(g=>g.id===id)?.label||'詳細';drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
   }
   for(const group of groups){
     const button=el('button',{type:'button'});button.append(el('span',{className:'rail-icon',textContent:group.icon}),el('span',{className:group.small?'rail-small':'',textContent:group.label}));
@@ -46,5 +46,5 @@ export function mapShell(groups) {
   window.visualViewport?.addEventListener('resize',resize);document.addEventListener('focusin',resize);document.addEventListener('focusout',resize);resize();
   function view(id,node,heading){if(!panels.has(id)){const box=el('div',{hidden:true});contents.append(box);panels.set(id,box);}if(node.parentNode!==panels.get(id))panels.get(id).replaceChildren(node);titles.set(id,heading);open(id);contents.scrollTop=0;}
   const detail=node=>view('route',node,'移動の記録'),story=(node,heading)=>view('story',node,heading);
-  return {open,hide,count,fit,drawer,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
+  return {open,hide,count,fit,drawer,view,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
 }

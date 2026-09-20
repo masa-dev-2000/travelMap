@@ -1,6 +1,7 @@
 import { authentication, continueGoogleLogin, dataUnavailablePage, finishGoogleLogin, loginErrorPage, logout, startGoogleLogin, type AuthState, type User } from './auth.ts';
 import { json, privateApi, publicApi } from './api.ts';
 import { InputError } from './validation.ts';
+import { viewerApi } from './viewer-api.ts';
 import { locationApi } from './location-api.ts';
 
 const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_name: 'ローカル', handle: 'local', avatar_url: null, icon: null, bio: '', tip_url: null};
@@ -67,7 +68,7 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
       const open=request.method === 'GET' ? ['/api/private/me','/api/private/bootstrap'] : request.method === 'POST' ? ['/api/private/signup','/api/private/signup/cancel'] : [];
       if (pending && !open.includes(url.pathname)) return secure(json({error:'利用規約への同意が必要です',signup:'/signup/'},403));
       const locationResponse=await locationApi(request,env.DB,user!.id);
-      return secure(locationResponse ?? await privateApi(request,env,user!));
+      return secure(locationResponse ?? await viewerApi(request,env,user!) ?? await privateApi(request,env,user!));
     }
     if (!['GET','HEAD'].includes(request.method)) return secure(json({error:'Method not allowed'},405));
     const asset=await env.ASSETS.fetch(new Request(url,request));

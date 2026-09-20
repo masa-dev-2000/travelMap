@@ -13,8 +13,9 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);$('#status-form').elements.status.value=data.user.status||'';everyone.setSelf(data.user.handle);paintFace(data.user);pf.elements.tip_url.value=data.user.tip_url||'';}
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);$('#status-form').elements.status.value=data.user.status||'';everyone.setSelf(data.user.handle);paintFace(data.user);$('#profile-bio').textContent=data.user.bio||'';pf.elements.tip_url.value=data.user.tip_url||'';}
   paintTravel(data.settings?.map_visible===true,data.settings?.map_visible_until);
+
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
   for(const select of document.querySelectorAll('form select[name=trip_id]'))fillSelect(select,trips,'日常・未設定');
   fillSelect($('#activity-form [name=category_id]'),categories.filter(c=>c.active&&c.kind==='activity'));
@@ -55,7 +56,7 @@ async function activities(reset=true){
     const purposeLabel=el('label',{textContent:'用途'}),fileLabel=el('label',{textContent:'ファイル'});purposeLabel.append(purpose);fileLabel.append(file);attachmentForm.append(purposeLabel,fileLabel,el('button',{textContent:'非公開で添付'}));
     attachmentForm.onsubmit=async event=>{event.preventDefault();const button=attachmentForm.querySelector('button');button.disabled=true;try{const selected=file.files[0];if(!selected||selected.size>8*1024*1024)throw new Error('8MB以内のファイルを選択してください');const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:item.id,purpose:purpose.value}),{method:'POST',headers:{'Content-Type':selected.type},body:selected});const result=await response.json();if(!response.ok)throw new Error(result.error);file.value='';notify('非公開で添付しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
     detail.append(title,attachmentForm);card.append(detail);$('#activities').append(entry);
-    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('me');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)map.easeTo({center:[item.longitude,item.latitude]});});}
+    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('profile');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)map.easeTo({center:[item.longitude,item.latitude]});});}
   }
   if(reset&&data.activities.length===0)$('#activities').append(el('p',{textContent:'まだ記録がありません。'}));
   activityOffset=data.next_offset;$('#more-activities').hidden=true;
@@ -113,7 +114,7 @@ async function transactions(reset=true){
   transactionOffset=data.next_offset;$('#more-transactions').hidden=transactionOffset===null;
   if(reset&&!data.transactions.length)$('#transactions').append(el('p',{textContent:'この期間の取引はありません。'}));
 }
-async function refresh(){await Promise.all([summary(),activities(),transactions()]);everyone.reload();}
+async function refresh(){await Promise.all([summary(),activities(),transactions()]);await everyone.reload();}
 function bindForm(selector,path,build,after){
   const form=$(selector);let lastBody='',key=crypto.randomUUID();
   form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button[type=submit],button:not([type])');button.disabled=true;
@@ -218,7 +219,7 @@ function renderTrips(){
     const actions=el('div',{className:'card-actions'});
     if(playTrip&&trip.entries){const play=el('button',{type:'button',className:'primary',textContent:'▶ 旅を再生'});play.onclick=()=>playTrip(trip.name,[{label:trip.name,load:async()=>{const rows=[];let offset=0;do{const data=await api('activities?'+new URLSearchParams({trip:trip.id,offset:String(offset)}));rows.push(...data.activities);offset=data.next_offset;}while(offset!==null);
       rows.sort((a,b)=>Date.parse(a.occurred_at)-Date.parse(b.occurred_at));// 自分の旅は私的データから(非公開の記録も含む)。共有URLは付けない
-      return {title:trip.name,steps:rows.map(r=>({date:jstDate(r),at:r.occurred_at,place:r.observed_place_name,category:r.category_name,memo:r.memo,spent:r.spent_jpy,photos:[],lng:r.longitude,lat:r.latitude})),face:{image:me.icon_url,icon:me.icon,avatar:me.avatar_url,name:me.display_name},color:'#216453'};}}]);actions.append(play);}
+      return {title:trip.name,source:'private',steps:rows.map(r=>({id:r.id,source:'private',rating:r.rating,date:jstDate(r),at:r.occurred_at,place:r.observed_place_name,category:r.category_name,memo:r.memo,spent:r.spent_jpy,photos:[],lng:r.longitude,lat:r.latitude})),face:{image:me.icon_url,icon:me.icon,avatar:me.avatar_url,name:me.display_name},color:'#216453'};}}]);actions.append(play);}
     const show=el('button',{type:'button',textContent:'この旅の記録だけ表示'});show.onclick=()=>{$('#trip-filter').value=trip.id;refresh().catch(error=>notify(error.message));};actions.append(show);card.append(actions);
     const form=el('form',{className:'row'}),name=el('input',{value:trip.name,maxLength:200,required:true}),save=el('button',{textContent:'名前を変更'});name.setAttribute('aria-label','旅の名前');form.append(name,save);
     form.onsubmit=async event=>{event.preventDefault();save.disabled=true;try{await api(`trips/${trip.id}`,{name:name.value.trim()});await bootstrap();everyone.reload();notify('旅の名前を変更しました');}catch(error){notify(error.message);}finally{save.disabled=false;}};card.append(form);
@@ -235,25 +236,26 @@ function drawOwn(){
   const other=!!(f?.person&&f.person!==me.handle),rows=!f||!f.active?allRecords:other?[]:allRecords.filter(r=>(!f.trip||tripName(r.trip_id)===f.trip)&&(!f.category||r.category_name===f.category)&&(!f.from||jst(r)>=f.from)&&(!f.to||jst(r)<=f.to));
   // 期間内に記録が無ければ、最後の地点だけ薄く出す(ほかの人・旅・カテゴリで絞っている間は出さない)
   route.render(rows,other||f?.trip||f?.category?[]:allRecords);
-  if(recordsLoaded)shell.count.textContent=everyone.countText(rows.length,allRecords.length);
+  // The shared map count is owned by the viewer projection, not private records.
 }
-// 右上の自分のアイコン → 設定シート
-const face=el('button',{type:'button',className:'me-button'});face.setAttribute('aria-label','設定を開く');shell.stage.append(face);
+// Profile identity belongs to the Profile rail item, never an extra settings button.
+const face=shell.button('profile').querySelector('.rail-icon');
 function paintFace(user){face.replaceChildren(whoMarker({image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name,color:'#356f68'}));}
-paintFace(me);face.onclick=()=>$('#settings-dialog').showModal();$('#close-settings').onclick=()=>$('#settings-dialog').close();
-$('#settings-dialog').addEventListener('click',event=>{if(event.target===event.currentTarget)event.currentTarget.close();});
+paintFace(me);
 // 足あと: 最近見てくれた人(数字は出さない)。未読があればレールの「じぶん」に点を付け、パネルを開いたら既読にする
 const ago=at=>{const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));return minutes<2?'たった今':minutes<60?minutes+'分前':minutes<1440?Math.floor(minutes/60)+'時間前':Math.floor(minutes/1440)+'日前';};
 async function footprints(){
-  try{const data=await api('footprints'),box=$('#footprints');box.replaceChildren();shell.button('me').classList.toggle('rail-dot',data.unread);
+  try{const data=await api('footprints'),box=$('#footprints');box.replaceChildren();shell.button('profile').classList.toggle('rail-dot',data.unread);
     if(!data.visitors.length)return;box.append(el('h2',{textContent:'最近見てくれた人'}));const row=el('div',{className:'visitors'});
     for(const v of data.visitors){const item=el('div',{className:'visitor'});item.append(whoMarker({image:v.icon_url,icon:v.icon,avatar:v.avatar_url,name:v.display_name,color:'#356f68'}),el('strong',{textContent:v.display_name}),el('span',{textContent:ago(v.at)}));row.append(item);}
     box.append(row);}catch{}
 }
-shell.drawer.addEventListener('viewchange',async event=>{if(event.detail==='me'&&shell.button('me').classList.contains('rail-dot')){try{await api('footprints/seen',{});shell.button('me').classList.remove('rail-dot');}catch{}}});
+shell.drawer.addEventListener('viewchange',async event=>{if(event.detail==='profile'&&shell.button('profile').classList.contains('rail-dot')){try{await api('footprints/seen',{});shell.button('profile').classList.remove('rail-dot');}catch{}}});
 const visitedToday=new Set();
 function visited(handle){if(visitedToday.has(handle))return;visitedToday.add(handle);api('footprints',{handle}).catch(()=>visitedToday.delete(handle));}
-try{await bootstrap();await refresh();}catch(error){notify(error.message);}
+// app.js has already loaded the viewer feed. A redundant startup reload could
+// cancel the user's first playback request while private panels finish loading.
+try{await bootstrap();await Promise.all([summary(),activities(),transactions()]);}catch(error){notify(error.message);}
 footprints();
 return {visited,setFilter:f=>{publicFilter=f;drawOwn();},refresh};
 }

@@ -1,7 +1,7 @@
 name: UI and private location checks
 on:
   pull_request:
-    paths: ['cloudflare/**', 'data_model/**', 'CODEMAP.md', 'docs/issues-2-7-implementation.md', '.github/workflows/ui-location-checks.yml']
+    paths: ['cloudflare/**', 'data_model/**', 'CODEMAP.md', 'docs/issues-2-7-implementation.md', 'docs/issues-9-13-implementation.md', '.github/workflows/ui-location-checks.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,10 +26,23 @@ jobs:
           python-version: '3.12'
       - run: npm ci
         working-directory: cloudflare
+      - name: Check every application JavaScript module
+        working-directory: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find public -name '*.js' -not -path 'public/vendor/*' -print0)
       - run: npm run check && npm test && npm run build
         working-directory: cloudflare
-      - run: python cloudflare/tests/check-location-migration.py
-      - run: python cloudflare/tests/check-location-indexes.py
+      - name: Migration integration
+        if: always()
+        run: python cloudflare/tests/check-location-migration.py
+      - name: Index and paging regression
+        if: always()
+        run: python cloudflare/tests/check-location-indexes.py
+      - name: Record tested revision
+        if: always()
+        run: mkdir -p test-artifacts && git rev-parse HEAD > test-artifacts/revision.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -57,9 +70,11 @@ jobs:
       - name: Real MapLibre/WebGL smoke (synthetic map style and data)
         if: always()
         run: python cloudflare/tests/browser-real-map.py
+      - name: Record tested revision
+        if: always()
+        run: mkdir -p test-artifacts && git rev-parse HEAD > test-artifacts/revision.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: ui-location-test-artifacts
           path: test-artifacts/
-          if-no-files-found: ignore

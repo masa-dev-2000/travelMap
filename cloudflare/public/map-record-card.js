@@ -1,13 +1,13 @@
 import './issue-style.js';
 import {el} from './shared.js';
 import {gl} from './owner-map.js';
-import {displayWhen} from './record-display.js';
+import {validLocation,displayWhen} from './record-display.js';
 const instances=new WeakMap();
 export function mapRecordCard(map,shell) {
   if(instances.has(map))return instances.get(map);
   const popup=new gl.Popup({maxWidth:'310px',offset:26,closeOnClick:false,focusAfterOpen:false,className:'tm-record-popup'});
-  let generation=0,controller=null,urls=[],current=null,adjustments=0;
-  function release(){generation++;controller?.abort();controller=null;for(const url of urls)URL.revokeObjectURL(url);urls=[];current=null;}
+  let generation=0,controller=null,urls=[],current=null,adjustments=0,floating=null;
+  function release(){floating?.remove();floating=null;generation++;controller?.abort();controller=null;for(const url of urls)URL.revokeObjectURL(url);urls=[];current=null;}
   function hide(){release();popup.remove();}
   popup.on('close',release);
   const safeFrame=run=>requestAnimationFrame(()=>{
@@ -41,7 +41,7 @@ export function mapRecordCard(map,shell) {
     const image=el('img',{className:'tm-card-photo',src:url,alt:caption||'記録の写真',decoding:'async'});
     image.onload=()=>safeFrame(run);image.onerror=()=>image.remove();node.prepend(image);
   }
-  function show(point,{openDetail=null,extra=null,note=''}={}){
+  function show(point,{openDetail=null,extra=null,note='',onPresented=null}={}){
     hide();if(!point?.card || point.kind!=='record')return;
     const run=generation;current=point.key;adjustments=0;controller=new AbortController();
     const node=el('article',{className:'tm-record-card'});node.setAttribute('aria-label','地点の記録');
@@ -52,7 +52,10 @@ export function mapRecordCard(map,shell) {
     if(note)node.append(el('p',{className:'hint',textContent:note}));
     if(openDetail){const detail=el('button',{type:'button',textContent:'詳細を見る'});detail.onclick=()=>{hide();openDetail();};node.append(detail);}
     if(extra){const button=el('button',{type:'button',textContent:extra.label});button.onclick=()=>{hide();extra.action();};node.append(button);}
-    popup.setLngLat([point.lng,point.lat]).setDOMContent(node).addTo(map);
+    if(validLocation(point.lat,point.lng))popup.setLngLat([point.lng,point.lat]).setDOMContent(node).addTo(map);
+    else{floating=el('div',{className:'tm-locationless-card'});const close=el('button',{type:'button',className:'maplibregl-popup-close-button',textContent:'×'});close.setAttribute('aria-label','記録カードを閉じる');close.onclick=hide;node.append(el('p',{className:'hint',textContent:'位置情報なし（地図は移動しません）'}));floating.append(node,close);shell.stage.append(floating);}
+    const close=popup.isOpen()?popup.getElement().querySelector('.maplibregl-popup-close-button'):null;close?.setAttribute('aria-label','記録カードを閉じる');
+    requestAnimationFrame(()=>{if(run===generation&&current===point.key)onPresented?.();});
     if(point.source==='public') {const p=point.card.photos?.[0];if(p)addPhoto(node,p.url,p.caption,run);}
     else if(point.source==='private')void fillPrivatePhotos(point,node,run,controller.signal);
     safeFrame(run);
@@ -60,5 +63,12 @@ export function mapRecordCard(map,shell) {
   document.addEventListener('keydown',event=>{if(event.key==='Escape' && popup.isOpen()){event.preventDefault();event.stopImmediatePropagation();hide();}},{capture:true});
   window.addEventListener('pagehide',hide);document.addEventListener('tm:auth-lost',hide);
   map.on('basemapchanging',hide);
-  const api={show,hide,current:()=>current};instances.set(map,api);return api;
+  const api={show,hide,current:()=>current,visible:key=>{
+    if(current!==key||document.hidden||document.querySelector('dialog[open]')||shell.stage.classList.contains('pane-open'))return false;
+    const node=floating||(popup.isOpen()?popup.getElement():null);if(!node||!node.getClientRects().length)return false;
+    const article=node.querySelector('.tm-record-card');if(!article)return false;
+    const r=article.getBoundingClientRect();if(r.width<=0||r.height<=0||r.bottom<=0||r.top>=innerHeight||r.right<=0||r.left>=innerWidth)return false;
+    const x=Math.max(1,Math.min(innerWidth-1,r.left+r.width/2)),y=Math.max(1,Math.min(innerHeight-1,r.top+Math.min(24,r.height/2)));
+    const hit=document.elementFromPoint(x,y);return !!hit&&article.contains(hit);
+  }};instances.set(map,api);return api;
 }

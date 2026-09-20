@@ -62,25 +62,38 @@ async function saveOnce(request: Request, db: D1Database, uid: string, body: Inp
 }
 
 // Travel mode: the account finished sign-up (terms accepted), map_visible is on and the optional auto-off time (map_visible_until) has not passed. Binds one ISO timestamp.
-const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?) AND EXISTS (SELECT 1 FROM users tu WHERE tu.id=${owner} AND tu.terms_accepted_at IS NOT NULL))`;
+export const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?) AND EXISTS (SELECT 1 FROM users tu WHERE tu.id=${owner} AND tu.terms_accepted_at IS NOT NULL))`;
 
-export async function publicApi(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  if (request.method !== 'GET') return json({error:'Method not allowed'},405);
-  if (url.pathname === '/api/public/entries') {
-    // precision decides what leaves the server: 'city' drops coordinates, 'hidden' drops place and coordinates. Delayed entries stay invisible until publish_at.
-    const handle = url.searchParams.get('u'), now = new Date().toISOString();
-    // 'at' (exact time, for "3 hours ago") is only exposed for entries published without a delay whose public date was not edited.
-    const entries = await query(env.DB, `SELECT p.id,p.date,CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
+export interface PublicFeedEntry {
+  id:string; date:string; at:string|null; author:string; author_name:string;
+  author_icon:string|null; author_avatar:string|null; author_icon_url:string|null;
+  place_name:string|null; memo:string; latitude:number|null; longitude:number|null;
+  category_name:string|null; trip_name:string|null; publication_seq?:number; unread?:number;
+  photos?:unknown[]; [key:string]:unknown;
+}
+// Identical publication/privacy gates; viewer preferences NEVER enter the shared cache.
+export async function loadPublicEntries(env:Env, handle:string|null, now:string, viewerId?:string):Promise<PublicFeedEntry[]> {
+    const entries = await query(env.DB, `SELECT p.id,p.date,${viewerId ? 'q.seq publication_seq,CASE WHEN q.seq>COALESCE(rc.last_seen_seq,0) THEN 1 ELSE 0 END unread,' : ''}CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
       tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,u.status author_status,u.status_at author_status_at,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
-      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
-      handle ? [now, now, text(handle,'ユーザー',40)] : [now, now]).all();
+      ${viewerId ? 'JOIN public_entry_sequence q ON q.entry_id=p.id LEFT JOIN public_read_cursors rc ON rc.author_user_id=p.user_id AND rc.viewer_user_id=?' : ''}
+      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}${handle ? ' AND u.handle=?' : ''}${viewerId ? ' AND p.user_id<>? AND NOT EXISTS (SELECT 1 FROM user_mutes m WHERE m.viewer_user_id=? AND m.muted_user_id=p.user_id)' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
+      [...(viewerId ? [viewerId] : []),now,now,...(handle ? [text(handle,'ユーザー',40)] : []),...(viewerId ? [viewerId,viewerId] : [])]).all<PublicFeedEntry>();
     const photos = await query(env.DB, `SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}`,[now,now]).all();
-    return json({entries:entries.results.map(e => ({...e, photos:photos.results.filter(p => p.entry_id === e.id).map(p => ({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`}))}))});
+
+    const byEntry=new Map<string,unknown[]>();
+    for(const p of photos.results){const key=String(p.entry_id);if(!byEntry.has(key))byEntry.set(key,[]);byEntry.get(key)!.push({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`});}
+    return entries.results.map(e=>({...e,photos:byEntry.get(e.id)||[]}));
+}
+
+export async function publicApi(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method !== 'GET') return json({error:'Method not allowed'},405);
+  if (url.pathname === '/api/public/entries') {
+    return json({entries:await loadPublicEntries(env,url.searchParams.get('u'),new Date().toISOString())});
   }
   const profile = url.pathname.match(/^\/api\/public\/users\/([a-z0-9-]+)$/);
   if (profile) {

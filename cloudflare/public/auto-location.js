@@ -21,13 +21,13 @@ export async function locationRequest(path,body,method=body===undefined?'GET':'P
     return result;
   }finally{clearTimeout(timeout);}
 }
-export async function mountAutoLocation(slot){
+export async function mountAutoLocation(slot,{compact=false,onError=()=>{}}={}){
   if(!slot)return null;
   let session;try{const response=await fetch('/api/public/session',{cache:'no-store'});if(!response.ok)return null;session=await response.json();}catch{return null;}
   if(!session.user||session.needs_signup)return null;
   let clientId;try{clientId=localStorage.getItem(CLIENT);if(!/^[0-9a-f-]{36}$/i.test(clientId||'')){clientId=crypto.randomUUID();localStorage.setItem(CLIENT,clientId);}}catch{clientId=null;}
   const root=el('div',{className:'auto-location'}),toggle=el('button',{type:'button',textContent:'自動位置記録 OFF'}),log=el('button',{type:'button',textContent:'位置ログ'}),status=el('span',{className:'auto-location-state',textContent:'前面表示中・5分ごと・本人のみ'});
-  toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false');status.setAttribute('role','status');root.append(toggle,log,status);slot.append(root);
+  toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false');status.setAttribute('role','status');root.append(toggle,status);if(!compact)root.append(log);else{root.classList.add('compact');status.classList.add('sr-only');}slot.append(root);
   if(!clientId){toggle.disabled=true;status.textContent='端末の保存領域を利用できないため自動記録は停止しています';}
   const pageId=crypto.randomUUID();let wake=null,channel=null;
   try{channel=new BroadcastChannel('travelmap.locations');}catch{}
@@ -36,7 +36,7 @@ export async function mountAutoLocation(slot){
     lease:body=>locationRequest('location-capture',body,'POST',body.command==='stop'),
     getPosition:()=>new Promise((resolve,reject)=>{if(!navigator.geolocation){reject(new Error('位置情報に対応していません'));return;}navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true,maximumAge:0,timeout:20000});}),
     save:body=>locationRequest('location-samples',body),onSaved:notify,
-    onState:state=>{toggle.setAttribute('aria-checked',String(state.enabled));toggle.textContent='自動位置記録 '+(state.enabled?'ON':'OFF');status.textContent=state.message;status.dataset.error=String(state.phase==='error');if(!state.enabled){void wake?.release();wake=null;}}
+    onState:state=>{toggle.setAttribute('aria-checked',String(state.enabled));toggle.textContent='自動位置記録 '+(state.enabled?'ON':'OFF');status.textContent=state.message;status.dataset.error=String(state.phase==='error');toggle.title=state.message;if(state.phase==='error')onError(state.message);if(!state.enabled){void wake?.release();wake=null;}}
   });
   toggle.onclick=()=>{if(control.state().enabled){control.stop();try{sessionStorage.removeItem(HANDOFF);}catch{}}else{void control.start();if(navigator.wakeLock)navigator.wakeLock.request('screen').then(lock=>{if(control.state().enabled)wake=lock;else void lock.release();}).catch(()=>{});}};
   if(channel)channel.onmessage=event=>{if(event.data?.type==='changed')document.dispatchEvent(new Event('tm:location-change'));};
@@ -72,7 +72,7 @@ export async function mountAutoLocation(slot){
   document.addEventListener('tm:auth-lost',()=>{control.stop('ログイン状態が変わったため停止しました');toggle.disabled=true;log.disabled=true;for(const dialog of document.querySelectorAll('.auto-location-dialog'))dialog.close();try{sessionStorage.removeItem(HANDOFF);}catch{}});
   document.addEventListener('click',event=>{if(event.target.closest?.('#logout'))document.dispatchEvent(new Event('tm:auth-lost'));},{capture:true});
   document.addEventListener('submit',event=>{if(event.target.action&&new URL(event.target.action).pathname==='/auth/logout'){control.stop();try{sessionStorage.removeItem(HANDOFF);}catch{}}},{capture:true});
-  log.onclick=()=>openLocationLog(notify);
+  if(!compact)log.onclick=()=>openLocationLog(notify);
   return {root,control};
 }
 function openLocationLog(notify){
