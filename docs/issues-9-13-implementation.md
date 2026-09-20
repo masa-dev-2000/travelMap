@@ -100,3 +100,21 @@ against the pre-repair controller and pass with the repair). `browser-playback-l
 adds four app-level cases, run with both the fake renderer and real MapLibre by
 `browser-real-map.py`. The CI run/revision recorded in PR #14 is the release evidence;
 this document alone does not assert a successful run or authorize production changes.
+
+## First-play startup race (bd1860e)
+
+Run 35517701936 exposed a real initialization race: after the first viewer feed became
+available, completing private Profile initialization issued another viewer reload and
+aborted the user's pending Play request. The Play promise returned without starting.
+The original obscured-card assertion and timeouts were not weakened to hide this failure.
+
+The private panel now bootstraps its own summary, activities and transactions without
+reloading the already loaded viewer feed. Later user refresh/save operations still await
+the public metadata refresh. `test_play_during_profile_bootstrap` holds the two requests
+explicitly and verifies that finishing Profile does not issue a third feed or cancel Play.
+This regression runs with both renderers, alongside the existing lifecycle cases.
+
+Current test matrix: 83 Node cases, 18 standard-browser cases plus four lifecycle cases,
+and seven real-MapLibre cases plus four lifecycle cases. These are configured case counts;
+final successful execution, checked-out revision and artifact IDs must be recorded on
+PR #14. A previous run's success is not evidence that a later commit passed.
