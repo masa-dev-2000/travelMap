@@ -2,7 +2,7 @@
 
 ## 状態と目次
 
-修正前の実装: `2256782143bda1d56a8819c15a645c2c112afd22`。対象はDraft PR #8。mainへのマージ・本番配備・本番DB変更はこの作業に含めない。
+初期実装: `2256782143bda1d56a8819c15a645c2c112afd22`。PR #8 はレビュー修正後、2026-09-20に `main` へマージ済み（merge commit `b6ad5ac574545a79211018cf041680a9afbd1f04`）。本番配備・本番DB変更はまだ別工程として未完了。
 
 [要望対応](#要望対応) / [レビュー修正](#レビュー修正) / [検証](#検証) / [dbと索引](#dbと索引) / [配備条件](#配備条件)
 
@@ -47,7 +47,7 @@
 
 修正前CIの失敗は[レビュー](https://github.com/masa-dev-2000/travelMap/pull/8#pullrequestreview-5260025927)と[原因追及](https://github.com/masa-dev-2000/travelMap/pull/8#issuecomment-5748713795)に記録済み。診断workflowのsuccessを製品テストの成功に読み替えない。
 
-修正後の実行結果はPR #8に対象コミットとCI runを紐づけて記録する。この文書のテスト設計だけで合格済みとは扱わない。
+最終head `27c28a6817ff1b6a6f50cdc85a6a03d3f599bccf` のCI run `35509777387` は core/browser と実MapLibre/WebGL限定試験まで成功した。これはiPhone実機・実GPS・本番D1・本番Workerの合格を意味しない。
 
 - `npm run check && npm test && npm run build`: 既存Workerと追加状態/API試験。ビルドはローカル用のdry-runで本番配備ではない。
 - `worker-handoff.test.ts`: 実際のWorker/認証/Origin/Miniflare D1を通す一回用引き継ぎ。
@@ -70,8 +70,17 @@ CIのcore/browserは独立ジョブで、一方の失敗で他方の試験を飛
 
 ## 配備条件
 
-最終headのCI、代表的な実地図での操作、iPhoneの日本語/数字キーボード・カーソル・写真キャンセル/復帰・ロック復帰・アカウント切替を確認してからマージ/公開を判断する。iPhone実機と実GPSは未確認。
+最終headのCIは合格し、mainへのマージは完了した。公開前にはiPhoneの日本語/数字キーボード・カーソル・写真キャンセル/復帰・ロック復帰・アカウント切替を確認する。iPhone実機と実GPSは未確認。
 
 配備時は対象D1、既適用migration、バックアップ/復旧方法を別途確認し、未適用の0011→0012→コードの順。0012はALTER TABLEのためmigration台帳で一度だけ適用し、累積schemaへ全migrationを重ねて二重適用しない。本番の索引存在はソースだけで確認済みと扱わない。
 
 戻す場合は旧コードまたは機能停止へ戻し、位置データや追加列を削除しない。実装済み/CI合格/実機合格/本番反映は別の状態として管理する。
+
+
+## 2026-09-20 正本更新
+
+- 実装: mainへ反映済み。
+- CI: 最終headで合格済み。
+- 本番: **未反映**。本番D1 migrationとWorker deployを実施済みとは記録しない。
+- Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。本番用 `wrangler.production.jsonc` は運用上Git管理外であり、リポジトリには実Account ID/D1 IDを保存しない。
+- 本番作業を再開する際は、Cloudflare認証済み環境で本番設定の存在と Worker=`travelmap` / D1=`travelmap` / R2=`travelmap-files` を照合し、バックアップ後に未適用migration→コードの順で反映する。
