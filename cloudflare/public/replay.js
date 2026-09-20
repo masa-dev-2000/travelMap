@@ -6,8 +6,8 @@ import {mapRecordCard} from './map-record-card.js';
 export function makeReplay(map,shell,{tracks,begin,end}){
   const box=el('div',{className:'replay-control'}),play=el('button',{type:'button',className:'replay-play',textContent:'▶ 再生'});
   const restart=el('button',{type:'button',textContent:'⏮ 最初から',hidden:true}),stop=el('button',{type:'button',textContent:'✕ 終了',hidden:true}),label=el('span',{className:'replay-date',hidden:true});
-  const speedRow=el('label',{className:'replay-speed',hidden:true}),speed=el('input',{type:'range',min:'0.25',max:'4',step:'0.25',value:'1'}),value=el('output',{textContent:'1.00×'});
-  speed.setAttribute('aria-label','再生速度');speedRow.append(el('span',{textContent:'再生速度'}),el('span',{textContent:'遅い'}),speed,el('span',{textContent:'速い'}),value);
+  const speedRow=el('button',{type:'button',className:'replay-speed',hidden:true,textContent:'1.0×'}),speed={value:'1'};
+  speedRow.setAttribute('aria-label','再生速度 1倍。タップで変更');
   const seek=el('input',{className:'replay-progress',type:'range',min:'0',max:'1',step:'0.001',value:'0',hidden:true}),next=el('button',{type:'button',textContent:'次の記録',hidden:true});seek.setAttribute('aria-label','再生位置');
   label.setAttribute('role','status');box.append(speedRow,seek,play,restart,stop,next,label);shell.stage.append(box);
   const cards=mapRecordCard(map,shell),empty={type:'FeatureCollection',features:[]};
@@ -59,11 +59,11 @@ export function makeReplay(map,shell,{tracks,begin,end}){
     box.classList.remove('active');shell.stage.classList.remove('replay-on');timeline=null;end();
   }
   play.onclick=()=>playing?pause():start();restart.onclick=()=>{if(active)seekTo(0);else start();};stop.onclick=finish;
-  let currentSpeed=1;
-  speed.oninput=()=>{
-    const requested=clampSpeed(speed.value);
-    // Finish the old-rate interval before installing the new multiplier.
-    speed.value=String(currentSpeed);if(playing)advance(performance.now());currentSpeed=requested;speed.value=String(requested);value.value=requested.toFixed(2)+'×';speed.setAttribute('aria-valuetext',requested.toFixed(2)+'倍');
+  let currentSpeed=1;const speedSteps=[.5,1,1.5,2,4];
+  speedRow.onclick=()=>{
+    if(playing)advance(performance.now());
+    const current=Math.max(0,speedSteps.indexOf(currentSpeed)),requested=speedSteps[(current+1)%speedSteps.length];
+    currentSpeed=requested;speed.value=String(requested);speedRow.textContent=requested.toFixed(1)+'×';speedRow.setAttribute('aria-label',`再生速度 ${requested}倍。タップで変更`);
   };
   seek.oninput=()=>{const requested=Number(seek.value);pause();seekTo(requested);};next.onclick=()=>{const point=timeline?.order.find(p=>p.kind==='record'&&p.ms>elapsed);seekTo(point?point.ms/timeline.duration:1);};
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)pause();});
