@@ -34,8 +34,10 @@ export function makeStory(map,shell,{begin=()=>{},end=()=>{}}={}){
     label.textContent=`${data.face?.name||data.title||''} · ${index+1}/${steps.length}`;label.title=label.textContent;
     seek.setAttribute('aria-valuetext',`${index+1}件目 / ${steps.length}件`);
     if(validLocation(step.lat,step.lng)){
-      marker?.setLngLat([step.lng,step.lat]);map[reduced()?'jumpTo':'easeTo']({center:[step.lng,step.lat],zoom:Math.max(7,map.getZoom()),duration:Math.round(300/multiplier),padding:0});
-    }
+      if(!marker){const node=el('div',{className:'who-pin story-pin'}),face=el('div',{className:'who-button'});face.append(whoMarker({...data.face,color:data.color||'#216453'}));node.append(face);marker=new gl.Marker({element:node}).setLngLat([step.lng,step.lat]).addTo(map);}
+      else marker.setLngLat([step.lng,step.lat]);
+      map[reduced()?'jumpTo':'easeTo']({center:[step.lng,step.lat],zoom:Math.max(7,map.getZoom()),duration:Math.round(300/multiplier),padding:0});
+    }else{marker?.remove();marker=null;}
     draw();cards.show(item,{openDetail:()=>{pause();const content=el('article',{className:'record-detail'});content.append(el('h2',{textContent:item.card.title}),el('p',{textContent:step.memo||''}));shell.detail(content);},onPresented:()=>{
       // Only an actually presented card can advance read state. Hiding the tab,
       // opening a dialog, scrubbing past it, or closing it invalidates this timer.
@@ -63,8 +65,7 @@ export function makeStory(map,shell,{begin=()=>{},end=()=>{}}={}){
     data=structuredClone(next);steps=data.steps;callbacks=options;begin();active=true;index=0;generation++;
     shell.stage.classList.add('replay-on');box.classList.add('active');position.hidden=speed.hidden=restart.hidden=stop.hidden=false;
     seek.max=String(steps.length-1);
-    const first=steps.find(s=>validLocation(s.lat,s.lng));
-    if(first){const node=el('div',{className:'who-pin story-pin'}),face=el('div',{className:'who-button'});face.append(whoMarker({...data.face,color:data.color||'#216453'}));node.append(face);marker=new gl.Marker({element:node}).setLngLat([first.lng,first.lat]).addTo(map);}
+    // A locationless step must never borrow an earlier or a future step's pin.
     // Reduced-motion users advance records explicitly, without automatic camera jumps.
     restart.textContent=reduced()?'›':'↶';restart.setAttribute('aria-label',reduced()?'次の記録':'最初から');
     playing=!reduced()&&!document.hidden;setPlay();paint();schedule();return true;

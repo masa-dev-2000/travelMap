@@ -17,31 +17,31 @@ export function makePlaybackController({state,player,refresh,loadGroup,markRead,
   function startItem(run){
     if(disposed||run!==generation||!queue[queueIndex])return;
     const item=queue[queueIndex];
-    player.load(item.data,{onSeen:seen,onStop:stop,onComplete:()=>{
+    player.load(item.data,{onSeen:step=>run===generation?seen(step):undefined,onStop:stop,onComplete:()=>{
       if(run!==generation)return;
       if(++queueIndex<queue.length){startItem(run);}else{player.finish(false);queue=[];notify(mode==='unread'?'新しい記録はありません':'再生が終わりました');}
     }});
   }
   async function play(){
-    stop();const run=generation,selected=state.state().selectedUser;mode=selected?'selected':'unread';abort=new AbortController();loading=true;
+    stop();if(disposed||document.hidden)return;const run=generation,selected=state.state().selectedUser;mode=selected?'selected':'unread';abort=new AbortController();loading=true;
     try{
       const ok=await refresh({signal:abort.signal});if(ok===false)return;
       if(disposed||run!==generation||state.state().selectedUser!==selected||!eligible(state.state()))return;
       const snapshot=state.state(),groups=playbackQueue(snapshot);
       if(!groups.length){notify(selected?'この期間に再生できる記録はありません':'新しい記録はありません');return;}
       const loaded=await Promise.all(groups.map(async group=>({...group,public:true,data:await loadGroup(group,abort.signal)})));
-      if(run!==generation||disposed)return;queue=loaded;queueIndex=0;startItem(run);
+      if(run!==generation||disposed||document.hidden)return;queue=loaded;queueIndex=0;startItem(run);
     }catch(error){if(run===generation&&error.name!=='AbortError')notify(error.message||'再生できませんでした');}
     finally{if(run===generation){loading=false;abort=null;}}
   }
   // Own trips and shared URLs use the same player, without mixing private steps
   // into the public read queue. An options picker is an entry point, not a player.
   async function openOptions(title,options,{publicEntries=false}={}){
-    stop();const run=generation;mode='selected';abort=new AbortController();loading=true;
+    stop();if(disposed||document.hidden)return;const run=generation;mode='selected';abort=new AbortController();loading=true;
     try{
       const option=options.length===1?options[0]:await choose(title,options);
       if(!option||run!==generation)return;
-      const data=await option.load(abort.signal);if(run!==generation||disposed)return;
+      const data=await option.load(abort.signal);if(run!==generation||disposed||document.hidden)return;
       if(!data?.steps?.length){notify('この期間に再生できる記録はありません');return;}
       queue=[{public:publicEntries,rows:data.steps.filter(s=>s.publicEntryId).map(s=>({id:s.publicEntryId})),data:structuredClone(data)}];queueIndex=0;startItem(run);
     }catch(error){if(run===generation&&error.name!=='AbortError')notify(error.message||'再生できませんでした');}
@@ -50,5 +50,6 @@ export function makePlaybackController({state,player,refresh,loadGroup,markRead,
   const authLost=()=>{stop();state.clear();};
   const visibility=()=>{if(document.hidden)suspend();};
   document.addEventListener('visibilitychange',visibility);document.addEventListener('tm:auth-lost',authLost);
-  return {play,stop,suspend,openOptions,state:()=>({generation,mode,index:queueIndex,total:queue.length,author:queue[queueIndex]?.user?.handle||null}),destroy(){disposed=true;stop();unsubscribe();document.removeEventListener('tm:auth-lost',authLost);document.removeEventListener('visibilitychange',visibility);}};
+  globalThis.addEventListener?.('pagehide',stop);
+  return {play,stop,suspend,openOptions,state:()=>({generation,mode,index:queueIndex,total:queue.length,author:queue[queueIndex]?.user?.handle||null}),destroy(){disposed=true;stop();unsubscribe();document.removeEventListener('tm:auth-lost',authLost);document.removeEventListener('visibilitychange',visibility);globalThis.removeEventListener?.('pagehide',stop);}};
 }

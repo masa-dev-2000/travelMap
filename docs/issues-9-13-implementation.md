@@ -81,3 +81,22 @@ applied schemas: never run `migrations apply` or replay 0011/0012 from that list
 Verify current structure and backup, then apply only missing 0013 → 0014 → 0015 once and
 verify columns/FK/indexes before deploying code. Rollback code and schema recovery are separate;
 do not delete added data to roll back UI. Preserve the archived legacy cursor table.
+
+## Follow-up lifecycle repairs (after 7d0c79d)
+
+- Opening Profile, Record, another detail or the custom-period view invalidates pending
+  playback even when a loader ignores its AbortSignal. The player's own option picker
+  remains an intentional playback entry point and is not cancelled by opening itself.
+- Settings and a hidden page pause an already displayed queue without discarding its
+  snapshot. If playback has not been displayed yet, they cancel it instead. Returning
+  to the page or closing Settings never starts that old request. Page exit also cancels.
+- Read callbacks are bound to the current playback generation; an old callback cannot
+  acknowledge a record after stop, selection change or authentication loss.
+- Locationless records never show a previous or future record's playback pin. A marker
+  is created only when the current record has coordinates, and removed on an unlocated step.
+
+Regression evidence: `playback-lifecycle.test.ts` adds five Node cases (all five fail
+against the pre-repair controller and pass with the repair). `browser-playback-lifecycle.py`
+adds four app-level cases, run with both the fake renderer and real MapLibre by
+`browser-real-map.py`. The CI run/revision recorded in PR #14 is the release evidence;
+this document alone does not assert a successful run or authorize production changes.
