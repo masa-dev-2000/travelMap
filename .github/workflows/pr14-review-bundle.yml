@@ -1,0 +1,31 @@
+name: PR14 isolated review bundle
+on:
+  push:
+    branches: [feat/issues-9-13-map-social-playback]
+    paths: [.github/workflows/pr14-review-bundle.yml]
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci && node scripts/prepare-assets.mjs
+        working-directory: cloudflare
+      - name: Package only reviewed source and test dependencies, never credentials
+        run: |
+          mkdir -p /tmp/pr14-review-bundle
+          git archive --format=tar HEAD | gzip > /tmp/pr14-review-bundle/source.tar.gz
+          tar -czf /tmp/pr14-review-bundle/dependencies.tar.gz cloudflare/node_modules cloudflare/public/vendor
+          git rev-parse HEAD > /tmp/pr14-review-bundle/commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr14-isolated-review-checkout
+          path: /tmp/pr14-review-bundle/
+          retention-days: 1
