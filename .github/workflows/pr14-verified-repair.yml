@@ -43,9 +43,11 @@ jobs:
           subprocess.run(['git','merge-base','--is-ancestor',manifest['base'],'HEAD'],check=True)
           root=Path.cwd();changes=[]
           for name,entry in manifest['files'].items():
+              # Workflow changes use the authorized connector separately, never this runner token.
+              if name.startswith('.github/workflows/'): continue
               path=PurePosixPath(name)
               assert not path.is_absolute() and '..' not in path.parts
-              assert name.startswith(('cloudflare/','docs/','.github/workflows/')) or name in ('.gitignore','CODEMAP.md')
+              assert name.startswith(('cloudflare/','docs/')) or name in ('.gitignore','CODEMAP.md')
               target=root/name;assert not target.is_symlink()
               previous=target.read_bytes() if target.exists() else None
               assert (blob(previous) if previous is not None else None)==entry['old'], 'Concurrent source change: '+name
@@ -65,10 +67,9 @@ jobs:
               if result is None: target.unlink()
               else:
                   target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(result)
-          subprocess.run(['git','add','-A','--',*manifest['files']],check=True)
-          subprocess.run(['git','rm','--','.github/workflows/pr14-verified-repair.yml'],check=True)
+          subprocess.run(['git','add','-A','--',*[name for name,_ in changes]],check=True)
           subprocess.run(['git','diff','--cached','--check'],check=True)
-          print('Verified',len(changes),'source changes. No production operations.')
+          print('Verified',len(changes),'source changes. No production operations or workflow writes.')
           PY
       - id: commit
         name: Fast-forward only the existing Draft PR branch
