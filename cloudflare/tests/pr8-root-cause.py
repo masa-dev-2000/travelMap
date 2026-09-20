@@ -1,7 +1,11 @@
 """Read-only PR8 diagnostics. Changes only ephemeral test copies, never app sources.
-Runs the original browser smoke with native Chromium Geolocation instrumentation.
+Separates a native Chromium provider matrix from controlled-provider UI tests.
 """
 from pathlib import Path
+from http.server import ThreadingHTTPServer,SimpleHTTPRequestHandler
+from functools import partial
+from threading import Thread
+from playwright.sync_api import sync_playwright
 import hashlib,json,os,subprocess,sys
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -23,6 +27,7 @@ instrument=r'''(() => {
   if(geo)for(const name of ['watchPosition','getCurrentPosition']){
     const native=geo[name].bind(geo);
     geo[name]=(ok,fail,options)=>{
+      if(name==='getCurrentPosition'){__gps.push({kind:'controlled fresh request',at:Date.now()});setTimeout(()=>{const timestamp=Date.now();__gps.push({kind:'controlled fresh success',at:timestamp});ok({timestamp,coords:{latitude:35,longitude:134,accuracy:10}});},0);return;}
       const requested=Date.now();__gps.push({kind:name,requested,options,visibility:document.visibilityState});
       return native(p=>{__gps.push({kind:name+' success',requested,now:Date.now(),timestamp:p.timestamp,age:Date.now()-p.timestamp,lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy});ok(p);},e=>{__gps.push({kind:name+' error',requested,now:Date.now(),code:e.code,message:e.message});fail?.(e);},options);
     };
@@ -36,16 +41,36 @@ def replace_once(text,old,new):
     assert text.count(old)==1,('anchor missing/not unique',old,text.count(old))
     return text.replace(old,new,1)
 
+class Quiet(SimpleHTTPRequestHandler):
+    def log_message(self,*a):pass
+server=ThreadingHTTPServer(('127.0.0.1',0),partial(Quiet,directory=str(ROOT/'cloudflare/public')))
+Thread(target=server.serve_forever,daemon=True).start()
+native=[]
+try:
+    with sync_playwright() as p:
+        browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
+        for repeat in range(3):
+            for name,watch,maximum_age,clear in [('cold',False,0,False),('warm-watch-zero-age',True,0,False),('warm-watch-cache-allowed',True,5000,False),('clear-watch-then-request',True,0,True)]:
+                ctx=browser.new_context(geolocation={'latitude':35,'longitude':134},permissions=['geolocation'])
+                page=ctx.new_page();page.route('**/__native_geo_probe',lambda r:r.fulfill(content_type='text/html',body='<!doctype html><html><body>Native Geolocation diagnostic</body></html>'))
+                page.goto(f'http://127.0.0.1:{server.server_port}/__native_geo_probe')
+                if watch:
+                    page.evaluate("() => {window.first=null;window.wid=navigator.geolocation.watchPosition(p=>window.first={timestamp:p.timestamp,age:Date.now()-p.timestamp},e=>window.first={error:e.code},{enableHighAccuracy:true,maximumAge:5000,timeout:1200});}")
+                    page.wait_for_function('window.first!==null',timeout=2000)
+                if clear:page.evaluate('navigator.geolocation.clearWatch(window.wid)')
+                result=page.evaluate("age=>new Promise(resolve=>{const start=Date.now();navigator.geolocation.getCurrentPosition(p=>resolve({success:true,elapsed:Date.now()-start,timestamp:p.timestamp,age:Date.now()-p.timestamp,lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),e=>resolve({success:false,elapsed:Date.now()-start,code:e.code,message:e.message}),{enableHighAccuracy:true,maximumAge:age,timeout:1200});})",maximum_age)
+                native.append({'case':name,'repeat':repeat,'browser':browser.version,'result':result});ctx.close()
+        browser.close()
+finally:server.shutdown()
+(ARTIFACTS/'native-matrix.json').write_text(json.dumps(native,ensure_ascii=False,indent=2))
+print('NATIVE_MATRIX '+json.dumps(native,ensure_ascii=False),flush=True)
+
 out=[]
-for name,fresh,headers in [('baseline',False,False),('fresh-native-fix',True,False),('fresh-native-fix-real-referrer-policy',True,True)]:
+for name,headers in [('controlled-provider',False),('controlled-provider-real-referrer-policy',True)]:
     code=source
     if headers:
         code=replace_once(code,'class Quiet(SimpleHTTPRequestHandler):\n','class Quiet(SimpleHTTPRequestHandler):\n    def end_headers(self):\n        self.send_header("Referrer-Policy","no-referrer")\n        super().end_headers()\n')
     code=replace_once(code,'    page=context.new_page();page.on',f'    context.add_init_script({instrument!r})\n    page=context.new_page();page.on')
-    if fresh:
-        old='    page.wait_for_function("document.querySelector(\'.auto-location-state\').textContent.startsWith(\'記録中\')")'
-        extra='    page.wait_for_function("window.__gps.some(e=>e.kind===\'getCurrentPosition\')",timeout=5000)\n    context.set_geolocation({"latitude":35.0001,"longitude":134.0001,"accuracy":10})\n'
-        code=replace_once(code,old,extra+old)
     first=code.index("    page.goto(origin+'/admin/record/')")
     end=code.index('    browser.close()',first)
     original=code[first:end]
@@ -77,5 +102,5 @@ for name,fresh,headers in [('baseline',False,False),('fresh-native-fix',True,Fal
     path.unlink(missing_ok=True)
     if (dest/'diagnostic.json').exists():result['diagnostic']=json.loads((dest/'diagnostic.json').read_text())
     out.append(result)
-(ARTIFACTS/'summary.json').write_text(json.dumps({'source_blobs':expected,'cases':out},ensure_ascii=False,indent=2))
+(ARTIFACTS/'summary.json').write_text(json.dumps({'source_blobs':expected,'native_matrix':native,'cases':out},ensure_ascii=False,indent=2))
 print('ROOT_CAUSE_SUMMARY '+json.dumps(out,ensure_ascii=False),flush=True)
