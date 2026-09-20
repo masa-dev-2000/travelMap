@@ -18,7 +18,7 @@ jobs:
         run: |
           python - <<'PY'
           import pathlib,hashlib,subprocess
-          bases={'cloudflare/public/panel-me.js':'77360063e43fa9c6625af71a443424fc943cdb87','cloudflare/tests/browser-smoke.py':'94b6e56e5ca5407b0093ff2f798fb259ae344d03','cloudflare/tests/browser-real-map.py':'d43a527e4c993bf02662be0baea02feec9b4d5b0'}
+          bases={'cloudflare/public/panel-me.js':'77360063e43fa9c6625af71a443424fc943cdb87','cloudflare/tests/browser-smoke.py':'94b6e56e5ca5407b0093ff2f798fb259ae344d03','cloudflare/tests/browser-real-map.py':'6957e49ba1711270d85e815a558bb568ae21ed41'}
           data={}
           for name,sha in bases.items():
               p=pathlib.Path(name);assert not p.is_symlink();b=p.read_bytes()
@@ -68,6 +68,8 @@ jobs:
           data[name]=s.replace(marker,test+marker)
           name='cloudflare/tests/browser-real-map.py';s=data[name];old="'BrowserTests.test_self_shared_url_stays_public_only'";assert s.count(old)==1
           data[name]=s.replace(old,old+",'BrowserTests.test_play_during_profile_bootstrap'")
+          assert "('browser-playback-lifecycle.py', [], '0')" in data[name]
+          assert "('browser-playback-lifecycle.py', [], '1')" in data[name]
           for name,s in data.items():pathlib.Path(name).write_text(s)
           subprocess.run(['python','-m','py_compile','cloudflare/tests/browser-smoke.py','cloudflare/tests/browser-real-map.py'],check=True)
           subprocess.run(['git','add','--',*bases],check=True)
