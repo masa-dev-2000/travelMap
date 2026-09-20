@@ -10,7 +10,7 @@ export function makeStory(map,shell,{begin,end}){
   const prev=el('button',{type:'button',textContent:'⏮ 前へ'}),play=el('button',{type:'button',className:'primary',textContent:'▶ 再生'}),next=el('button',{type:'button',textContent:'次へ ⏭'}),speed=el('select'),share=el('button',{type:'button',className:'story-share',textContent:'リンクをコピー',hidden:true});
   for(const [value,label] of SPEEDS)speed.append(new Option(label,value));speed.value='1';speed.setAttribute('aria-label','再生の速さ');seek.setAttribute('aria-label','記録の位置');progress.setAttribute('role','status');
   controls.append(prev,play,next,speed);player.append(progress,seek,controls,card,share);root.append(chooser,player);
-  let steps=[],index=0,playing=false,timer=0,frame=0,active=false,marker=null,styleReady=true,line=[],color='#216453',shareUrl=null,generation=0;
+  let steps=[],index=0,playing=false,timer=0,frame=0,active=false,marker=null,styleReady=true,line=[],color='#216453',shareUrl=null,generation=0,currentOption=null,sequential=false,sequence=[],sequenceIndex=0;
   const located=step=>step.lng!=null&&step.lat!=null;
   function drawLine(coords){
     if(!styleReady)return;const data={type:'FeatureCollection',features:coords.length>1?[{type:'Feature',geometry:{type:'LineString',coordinates:coords},properties:{}}]:[]};
@@ -30,7 +30,7 @@ export function makeStory(map,shell,{begin,end}){
   }
   // index の記録へ進む。animate のときは線を前の地点から伸ばし、地図も一緒に動かす
   function go(target,animate=false){
-    cancelAnimationFrame(frame);index=Math.max(0,Math.min(steps.length-1,target));paintCard();
+    cancelAnimationFrame(frame);index=Math.max(0,Math.min(steps.length-1,target));paintCard();if(typeof currentOption?.onSeen==='function')void currentOption.onSeen(steps[index]);
     const step=steps[index],done=steps.slice(0,index+1).filter(located).map(s=>[s.lng,s.lat]);
     if(!located(step)||!done.length){line=done;drawLine(line);if(done.length)marker?.setLngLat(done.at(-1));return 0;}
     const to=done.at(-1),from=line.length&&done.length>1?done.at(-2):null,zoom=Math.max(map.getZoom(),7),phone=innerWidth<=700,padding={top:0,left:0,right:0,bottom:phone?Math.round(map.getContainer().clientHeight*.35):0};
@@ -41,7 +41,7 @@ export function makeStory(map,shell,{begin,end}){
   }
   // 「移動」だけの記録は短く、メモや写真のある記録は長めに止まる
   const dwell=step=>((step.photos?.length||step.memo)?2600:step.category==='移動'?700:1500)*Number(speed.value);
-  function schedule(wait){clearTimeout(timer);timer=setTimeout(()=>{if(!playing)return;if(index>=steps.length-1){pause();play.textContent='▶ もう一度';return;}const moved=go(index+1,true);schedule(moved+dwell(steps[index]));},wait);}
+  function schedule(wait){clearTimeout(timer);timer=setTimeout(()=>{if(!playing)return;if(index>=steps.length-1){if(sequential&&sequenceIndex<sequence.length-1){pause();void run(sequence[++sequenceIndex]);return;}pause();play.textContent='▶ もう一度';return;}const moved=go(index+1,true);schedule(moved+dwell(steps[index]));},wait);}
   function start(){if(index>=steps.length-1)go(0);playing=true;play.textContent='⏸ 一時停止';schedule(dwell(steps[index]));}
   function pause(){playing=false;clearTimeout(timer);play.textContent='▶ 再生';}
   function manual(target){pause();go(target,false);}
@@ -63,7 +63,7 @@ export function makeStory(map,shell,{begin,end}){
   function enter(title){if(!active){active=true;begin();shell.stage.classList.add('story-on');}shell.story(root,title);}
   // options: [{label,note,load:async()=>({title,steps,face,color,shareUrl})}]。1つならすぐ再生、複数なら選ぶ
   async function run(option){
-    const run=++generation;chooser.replaceChildren(el('p',{className:'hint',textContent:'読み込み中…'}));player.hidden=true;
+    currentOption=option;const run=++generation;chooser.replaceChildren(el('p',{className:'hint',textContent:'読み込み中…'}));player.hidden=true;
     let data;try{data=await option.load();}catch(error){chooser.replaceChildren(el('p',{className:'hint',textContent:error.message}));return;}
     if(run!==generation||!active)return;
     if(!data.steps.length){chooser.replaceChildren(el('p',{className:'hint',textContent:'再生できる記録がありません'}));return;}
@@ -73,12 +73,12 @@ export function makeStory(map,shell,{begin,end}){
     const firstSpot=steps.find(located);marker=firstSpot?new gl.Marker({element:pin,anchor:'center'}).setLngLat([firstSpot.lng,firstSpot.lat]).addTo(map):null;
     go(0);start();
   }
-  function open(title,options){
-    finishQuiet();enter(title);player.hidden=true;
-    if(options.length===1){run(options[0]);return;}
+  function open(title,options,config={}){
+    finishQuiet();enter(title);player.hidden=true;sequential=!!config.sequential;sequence=options;sequenceIndex=0;
+    if(options.length===1||sequential){run(options[0]);return;}
     chooser.replaceChildren(el('p',{className:'hint',textContent:'どの旅を再生しますか？'}));
     for(const option of options){const button=el('button',{type:'button',className:'story-option'});button.append(el('strong',{textContent:option.label}),el('span',{textContent:option.note||''}));button.onclick=()=>run(option);chooser.append(button);}
   }
-  function finishQuiet(){generation++;pause();cancelAnimationFrame(frame);marker?.remove();marker=null;line=[];steps=[];if(map.getSource('story'))map.getSource('story').setData({type:'FeatureCollection',features:[]});}
+  function finishQuiet(){generation++;pause();currentOption=null;sequential=false;sequence=[];sequenceIndex=0;cancelAnimationFrame(frame);marker?.remove();marker=null;line=[];steps=[];if(map.getSource('story'))map.getSource('story').setData({type:'FeatureCollection',features:[]});}
   return {open,finish,active:()=>active,state:()=>({active,playing,index,total:steps.length,step:steps[index]||null}),go:manual};
 }
