@@ -62,25 +62,38 @@ async function saveOnce(request: Request, db: D1Database, uid: string, body: Inp
 }
 
 // Travel mode: the account finished sign-up (terms accepted), map_visible is on and the optional auto-off time (map_visible_until) has not passed. Binds one ISO timestamp.
-const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?) AND EXISTS (SELECT 1 FROM users tu WHERE tu.id=${owner} AND tu.terms_accepted_at IS NOT NULL))`;
+export const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible' AND s.value='true') AND NOT EXISTS (SELECT 1 FROM user_settings s WHERE s.user_id=${owner} AND s.key='map_visible_until' AND s.value<>'' AND s.value<=?) AND EXISTS (SELECT 1 FROM users tu WHERE tu.id=${owner} AND tu.terms_accepted_at IS NOT NULL))`;
 
-export async function publicApi(request: Request, env: Env): Promise<Response> {
-  const url = new URL(request.url);
-  if (request.method !== 'GET') return json({error:'Method not allowed'},405);
-  if (url.pathname === '/api/public/entries') {
-    // precision decides what leaves the server: 'city' drops coordinates, 'hidden' drops place and coordinates. Delayed entries stay invisible until publish_at.
-    const handle = url.searchParams.get('u'), now = new Date().toISOString();
-    // 'at' (exact time, for "3 hours ago") is only exposed for entries published without a delay whose public date was not edited.
-    const entries = await query(env.DB, `SELECT p.id,p.date,CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
+export interface PublicFeedEntry {
+  id:string; date:string; at:string|null; author:string; author_name:string;
+  author_icon:string|null; author_avatar:string|null; author_icon_url:string|null;
+  place_name:string|null; memo:string; latitude:number|null; longitude:number|null;
+  category_name:string|null; trip_name:string|null; publication_seq?:number; unread?:number;
+  photos?:unknown[]; [key:string]:unknown;
+}
+// Identical publication/privacy gates; viewer preferences NEVER enter the shared cache.
+export async function loadPublicEntries(env:Env, handle:string|null, now:string, viewerId?:string):Promise<PublicFeedEntry[]> {
+    const entries = await query(env.DB, `SELECT p.id,p.date,${viewerId ? 'q.seq publication_seq,CASE WHEN q.seq>COALESCE(rc.last_seen_seq,0) THEN 1 ELSE 0 END unread,' : ''}CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
       tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,u.status author_status,u.status_at author_status_at,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
-      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}${handle ? ' AND u.handle=?' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
-      handle ? [now, now, text(handle,'ユーザー',40)] : [now, now]).all();
+      ${viewerId ? 'JOIN public_entry_sequence q ON q.entry_id=p.id LEFT JOIN public_read_cursors rc ON rc.author_user_id=p.user_id AND rc.viewer_user_id=?' : ''}
+      WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}${handle ? ' AND u.handle=?' : ''}${viewerId ? ' AND p.user_id<>? AND NOT EXISTS (SELECT 1 FROM user_mutes m WHERE m.viewer_user_id=? AND m.muted_user_id=p.user_id)' : ''} ORDER BY p.date DESC,a.occurred_at DESC,p.id`,
+      [...(viewerId ? [viewerId] : []),now,now,...(handle ? [text(handle,'ユーザー',40)] : []),...(viewerId ? [viewerId,viewerId] : [])]).all<PublicFeedEntry>();
     const photos = await query(env.DB, `SELECT f.id,f.entry_id,f.caption FROM public_photo_objects f JOIN public_entries p ON p.id=f.entry_id WHERE p.status='published' AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}`,[now,now]).all();
-    return json({entries:entries.results.map(e => ({...e, photos:photos.results.filter(p => p.entry_id === e.id).map(p => ({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`}))}))});
+
+    const byEntry=new Map<string,unknown[]>();
+    for(const p of photos.results){const key=String(p.entry_id);if(!byEntry.has(key))byEntry.set(key,[]);byEntry.get(key)!.push({id:p.id,caption:p.caption,url:`/api/public/photos/${p.id}`});}
+    return entries.results.map(e=>({...e,photos:byEntry.get(e.id)||[]}));
+}
+
+export async function publicApi(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method !== 'GET') return json({error:'Method not allowed'},405);
+  if (url.pathname === '/api/public/entries') {
+    return json({entries:await loadPublicEntries(env,url.searchParams.get('u'),new Date().toISOString())});
   }
   const profile = url.pathname.match(/^\/api\/public\/users\/([a-z0-9-]+)$/);
   if (profile) {
@@ -163,37 +176,6 @@ async function settingsWrites(db: D1Database, uid: string, body: Input): Promise
 
 export async function privateApi(request: Request, env: Env, user: User): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, db = env.DB, uid = user.id;
-  const orderKey=(date:string,id:string)=>date+'|'+id;
-  if (request.method === 'GET' && path === '/api/private/viewer-feed') {
-    const now=new Date().toISOString();
-    const [muteRows,cursorRows,feed]=await Promise.all([
-      query(db,'SELECT muted_user_id FROM user_mutes WHERE viewer_user_id=?',[uid]).all<{muted_user_id:string}>(),
-      query(db,'SELECT author_user_id,last_seen_order_key FROM public_read_cursors WHERE viewer_user_id=?',[uid]).all<{author_user_id:string;last_seen_order_key:string}>(),
-      query(db,`SELECT p.id,p.date,p.user_id,u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END icon_url
-        FROM public_entries p JOIN users u ON u.id=p.user_id
-        WHERE p.status='published' AND p.user_id<>? AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}
-        ORDER BY p.date,p.id`,[uid,now,now]).all<any>()
-    ]);
-    const muted=new Set(muteRows.results.map(r=>r.muted_user_id)), cursors=new Map(cursorRows.results.map(r=>[r.author_user_id,r.last_seen_order_key]));
-    const by=new Map<string,any>();
-    for(const row of feed.results){if(muted.has(row.user_id))continue;const key=orderKey(row.date,row.id),item=by.get(row.user_id)||{handle:row.handle,display_name:row.display_name,icon:row.icon,avatar_url:row.avatar_url,icon_url:row.icon_url,has_unread:false,first_unread:null,latest:null};item.latest=row;const cursor=cursors.get(row.user_id);if(!cursor||key>cursor){item.has_unread=true;item.first_unread??=key;}by.set(row.user_id,item);}
-    return json({users:[...by.values()],muted:[...muted]});
-  }
-  if (request.method === 'GET' && path === '/api/private/mutes') {
-    const rows=await query(db,'SELECT u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN m.muted_user_id IS NULL THEN 0 ELSE 1 END muted FROM users u LEFT JOIN user_mutes m ON m.muted_user_id=u.id AND m.viewer_user_id=? WHERE u.id<>? AND u.terms_accepted_at IS NOT NULL ORDER BY u.display_name,u.handle',[uid,uid]).all();return json({users:rows.results});
-  }
-  if (request.method === 'POST' && path === '/api/private/mutes') {
-    const body=await readInput(request),handle=text(body.handle,'ユーザー',40),muted=body.muted;if(typeof muted!=='boolean')throw new InputError('ミュート設定を確認してください');
-    const target=await query(db,'SELECT id FROM users WHERE handle=? AND id<>?',[handle,uid]).first<{id:string}>();if(!target)return json({error:'ユーザーが見つかりません'},404);
-    if(muted)await query(db,'INSERT OR IGNORE INTO user_mutes(viewer_user_id,muted_user_id,created_at) VALUES(?,?,?)',[uid,target.id,new Date().toISOString()]).run();else await query(db,'DELETE FROM user_mutes WHERE viewer_user_id=? AND muted_user_id=?',[uid,target.id]).run();return json({handle,muted});
-  }
-  if (request.method === 'POST' && path === '/api/private/read-cursor') {
-    const body=await readInput(request),entryId=text(body.entry_id,'記録',100);
-    const row=await query(db,`SELECT p.id,p.date,p.user_id FROM public_entries p WHERE p.id=? AND p.status='published' AND p.user_id<>?`,[entryId,uid]).first<any>();if(!row)return json({error:'記録が見つかりません'},404);
-    const key=orderKey(row.date,row.id),previous=await query(db,'SELECT last_seen_order_key FROM public_read_cursors WHERE viewer_user_id=? AND author_user_id=?',[uid,row.user_id]).first<{last_seen_order_key:string}>();
-    if(!previous||key>previous.last_seen_order_key)await query(db,`INSERT INTO public_read_cursors(viewer_user_id,author_user_id,last_seen_entry_id,last_seen_order_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(viewer_user_id,author_user_id) DO UPDATE SET last_seen_entry_id=excluded.last_seen_entry_id,last_seen_order_key=excluded.last_seen_order_key,updated_at=excluded.updated_at`,[uid,row.user_id,row.id,key,new Date().toISOString()]).run();
-    return json({saved:true,order_key:key});
-  }
   if (request.method === 'GET') {
     if (path === '/api/private/me') return json({user});
     if (path === '/api/private/bootstrap') {

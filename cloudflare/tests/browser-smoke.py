@@ -38,9 +38,14 @@ class BrowserTests(unittest.TestCase):
         cls.browser=cls.pw.chromium.launch(**opts)
     @classmethod
     def tearDownClass(cls):
-        cls.browser.close();cls.pw.stop();cls.server.shutdown()
+        cls.browser.close();cls.pw.stop();cls.server.shutdown();cls.server.server_close()
     def setUp(self):
         self.posts=[];self.samples=[];self.commands=[];self.errors=[];self.leases={};self.held=[];self.upload_mode='ok';self.create_mode='ok';self.owner='test-owner'
+        self.muted={'muted'};self.read_cursors={'friend':1,'read':6};self.read_posts=[];self.authenticated=True;self.viewer_delay=0;self.viewer_failure=False
+        today=time.strftime('%Y-%m-%d',time.gmtime())
+        def pub(id,author,seq,date=today,lat=35.3,lng=134.3):
+            return {'id':id,'author':author,'author_name':author,'date':date,'at':None,'latitude':lat,'longitude':lng,'place_name':id,'category_name':'観光','memo':'公開 '+id,'photos':[],'publication_seq':seq}
+        self.public_entries=[pub('old','friend',1,'2020-01-01'),pub('public-one','friend',2),pub('public-two','friend',3,lat=35.4,lng=134.4),pub('other-one','other',4,lat=35.6,lng=134.6),pub('read-one','read',5),pub('muted-one','muted',6),pub('my-public','test',7)]
         self.ctx=self.browser.new_context(viewport={'width':390,'height':844})
         self.ctx.add_init_script(GPS);self.ctx.tracing.start(screenshots=True,snapshots=True)
         self.ctx.route('**/api/**',self.api)
@@ -51,7 +56,7 @@ class BrowserTests(unittest.TestCase):
         folder=ART/self._testMethodName;folder.mkdir(exist_ok=True)
         try:
             state=self.page.evaluate("({url:location.pathname,referrer:document.referrer,phase:document.querySelector('.auto-location-state')?.textContent,gps:window.__gpsEvents})")
-            state.update(activity_posts=len(self.posts),location_posts=len(self.samples),commands=self.commands,errors=self.errors)
+            state.update(activity_posts=len(self.posts),location_posts=len(self.samples),commands=self.commands,errors=self.errors,reads=self.read_posts,muted=sorted(self.muted))
             (folder/'state.json').write_text(json.dumps(state,ensure_ascii=False,indent=2))
             self.page.screenshot(path=str(folder/'screen.png'))
             self.ctx.tracing.stop(path=str(folder/'trace.zip'))
@@ -63,8 +68,22 @@ class BrowserTests(unittest.TestCase):
         user={'handle':'test','display_name':'テスト','email':'fixture@example.invalid'}
         categories=[{'id':f'cat-{i}','name':n,'active':True,'kind':'activity'} for i,n in enumerate(['食費','その他','移動','交通費','観光費','温泉'])]+[{'id':'expense','name':'食費','active':True,'kind':'expense'}]
         status=200;data={}
-        if path=='/api/public/session':data={'user':user,'authenticated':True}
-        elif path=='/api/public/entries':data={'entries':[{'id':'public-one','author':'friend','author_name':'友人','date':today,'at':None,'latitude':35.3,'longitude':134.3,'place_name':'公開の場所','category_name':'観光','memo':'公開メモ','photos':[]}]}
+        if path=='/api/public/session':data={'user':user if self.authenticated else None,'authenticated':self.authenticated}
+        elif path=='/api/public/entries':data={'entries':self.public_entries}
+        elif path=='/api/private/viewer-feed':
+            if self.viewer_failure:status=503;data={'error':'人物情報を一時的に利用できません'}
+            else:data={'version':1,'self':'test','muted':sorted(self.muted),'entries':[{**e,'unread':e['publication_seq']>self.read_cursors.get(e['author'],0)} for e in self.public_entries if e['author']!='test' and e['author'] not in self.muted]}
+        elif path=='/api/private/mutes':
+            if method=='POST':
+                if body['muted']:self.muted.add(body['handle'])
+                else:self.muted.discard(body['handle'])
+                data=body
+            else:data={'users':[{'handle':name,'display_name':name,'muted':name in self.muted} for name in ['friend','other','read','muted']]}
+        elif path=='/api/private/read-cursor':
+            self.read_posts.append(body);entry=next((e for e in self.public_entries if e['id']==body['entry_id']),None)
+            if not entry or entry['author'] in self.muted:status=404;data={'error':'記録が見つかりません'}
+            else:
+                author=entry['author'];self.read_cursors[author]=max(entry['publication_seq'],self.read_cursors.get(author,0));data={'saved':True,'author':author,'last_seen_seq':self.read_cursors[author]}
         elif path=='/api/private/bootstrap':data={'user':user,'settings':{'map_visible':True,'publish_default':False},'categories':categories,'trips':[]}
         elif path=='/api/private/activities' and method=='POST':
             self.posts.append({'body':body,'key':route.request.headers.get('idempotency-key')});data={'id':'11111111-1111-4111-8111-111111111111'}
@@ -146,18 +165,73 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(len(self.samples),0)
     def test_map_card_and_seek_while_playing(self):
         p=self.page;p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible()
-        p.wait_for_function('!window.__tmMap.isStyleLoaded || window.__tmMap.isStyleLoaded()');p.get_by_role('button',name=re.compile('^最新 ')).click();expect(p.locator('.tm-record-card h2')).to_have_text('到着地点')
+        p.wait_for_function('!window.__tmMap.isStyleLoaded || window.__tmMap.isStyleLoaded()')
+        p.get_by_role('button',name=re.compile('^最新 ')).click();expect(p.locator('.tm-record-card h2')).to_have_text('到着地点')
         self.assertFalse(p.evaluate("document.querySelector('.map-stage').classList.contains('pane-open')"))
-        p.locator('.replay-play').click();expect(p.locator('.replay-speed')).to_be_visible()
-        p.locator('.replay-speed').click();self.assertEqual(p.evaluate('__tm.replay.state().speed'),1.5)
-        p.locator('.replay-speed').click();self.assertEqual(p.evaluate('__tm.replay.state().speed'),2)
+        p.locator('.replay-play').click();expect(p.locator('.replay-speed')).to_be_visible();p.locator('.replay-play').click()
+        self.assertEqual(p.evaluate('__tm.player.state().author'),'friend');self.assertEqual(p.evaluate('__tm.player.state().total'),2)
+        p.locator('.replay-speed').click();self.assertEqual(p.evaluate('__tm.player.state().speed'),1.5)
+        p.locator('.replay-speed').click();self.assertEqual(p.evaluate('__tm.player.state().speed'),2)
         expect(p.locator('.replay-speed')).to_have_text('2.0×')
-        p.locator('.replay-progress').evaluate("e=>{e.value='0.8';e.dispatchEvent(new Event('input',{bubbles:true}));}")
-        self.assertAlmostEqual(p.evaluate('__tm.replay.state().progress'),.8,places=4);self.assertFalse(p.evaluate('__tm.replay.state().playing'))
-        p.locator('.replay-progress').evaluate("e=>{e.value='1';e.dispatchEvent(new Event('input',{bubbles:true}));}")
-        expect(p.locator('.replay-date')).to_have_text(time.strftime('%Y-%m-%d',time.gmtime()))
+        p.locator('.replay-progress').evaluate("e=>{e.value=e.max;e.dispatchEvent(new Event('input',{bubbles:true}));}")
+        self.assertEqual(p.evaluate('__tm.player.state().index'),1);self.assertFalse(p.evaluate('__tm.player.state().playing'))
         self.assertLessEqual(p.locator('.replay-control.active').bounding_box()['height'],60)
-        self.assertTrue(p.locator('.period-chip').is_visible())
+        expect(p.locator('.tm-record-card h2')).to_have_text('public-two')
         p.locator('.maplibregl-popup-close-button').click();expect(p.locator('.tm-record-card')).to_have_count(0)
-        p.get_by_role('button',name='✕ 終了').click();self.assertFalse(p.evaluate('__tm.replay.active()'))
+        p.get_by_role('button',name='再生を終了',exact=True).click();self.assertFalse(p.evaluate('__tm.player.active()'))
+    def test_social_navigation_and_settings(self):
+        p=self.page;p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible()
+        self.assertEqual(p.locator('.map-rail button[aria-controls]').evaluate_all("nodes=>nodes.map(n=>n.getAttribute('aria-label'))"),['プロフィール','記録する','設定'])
+        expect(p.locator('.me-button,.friends-toggle,.route-overview,.maplibregl-ctrl-zoom-in')).to_have_count(0)
+        expect(p.locator('.auto-location button')).to_have_count(1)
+        p.get_by_role('button',name='プロフィール',exact=True).click();expect(p.locator('#view-profile #me-name')).to_have_text('テスト');expect(p.locator('#view-profile #money-panel')).to_be_visible()
+        p.get_by_role('button',name='パネルを閉じる').click();p.get_by_role('button',name='設定',exact=True).click()
+        expect(p.locator('#settings-dialog')).to_be_visible();expect(p.locator('#map-style-settings .basemap-control')).to_be_visible();expect(p.locator('#settings-dialog #profile-form')).to_have_count(0)
+        p.locator('#map-style-settings button',has_text='Bright').click();p.wait_for_function("document.body.dataset.basemap==='bright'")
+        p.get_by_role('button',name='設定を閉じる',exact=True).click()
+    def test_stories_mute_selection_and_unread(self):
+        p=self.page;p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible()
+        expect(p.locator('.story-person')).to_have_count(3);expect(p.locator('.story-person.unread')).to_have_count(2)
+        p.locator('.story-person[data-handle="friend"]').click();self.assertEqual(p.evaluate('__tm.viewerState.state().selectedUser'),'friend')
+        expect(p.locator('.story-person.unread')).to_have_count(2);expect(p.locator('.story-person[data-handle="muted"],.story-person[data-handle="test"]')).to_have_count(0)
+        p.get_by_role('button',name='設定',exact=True).click();p.get_by_role('checkbox',name='friendをミュート',exact=True).check()
+        expect(p.locator('.story-person[data-handle="friend"]')).to_have_count(0);self.assertEqual(p.evaluate('__tm.viewerState.state().selectedUser'),None)
+        p.get_by_role('button',name='設定を閉じる',exact=True).click();expect(p.locator('.friend-marker[data-handle="friend"]')).to_have_count(0)
+        p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()');self.assertEqual(p.evaluate('__tm.player.state().author'),'other')
+        p.get_by_role('button',name='再生を終了',exact=True).click()
+        p.get_by_role('button',name='設定',exact=True).click();p.get_by_role('checkbox',name='friendをミュート',exact=True).uncheck();expect(p.locator('.story-person[data-handle="friend"]')).to_have_count(1)
+    def test_selected_period_and_read_callback(self):
+        p=self.page;p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible();p.locator('.story-person[data-handle="friend"]').click()
+        p.locator('.period-chip').select_option('7');p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
+        self.assertEqual(p.evaluate('__tm.player.state().total'),2);expect(p.locator('.tm-record-card h2')).to_have_text('public-one')
+        p.wait_for_timeout(750);self.assertTrue(any(r['entry_id']=='public-one' for r in self.read_posts));p.get_by_role('button',name='再生を終了',exact=True).click()
+        p.locator('.period-chip').select_option('all');p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()');self.assertEqual(p.evaluate('__tm.player.state().total'),3)
+    def test_hidden_pause_and_snapshot(self):
+        p=self.page;p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible();p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
+        # Deterministic visibility event, not an iPhone screen-lock certification.
+        p.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>true});document.dispatchEvent(new Event('visibilitychange'))")
+        before=len(self.read_posts);index=p.evaluate('__tm.player.state().index');p.wait_for_timeout(3000)
+        self.assertEqual(len(self.read_posts),before);self.assertEqual(p.evaluate('__tm.player.state().index'),index);self.assertFalse(p.evaluate('__tm.player.state().playing'))
+        self.public_entries.append({**self.public_entries[1],'id':'new-later','publication_seq':8})
+        p.evaluate("Object.defineProperty(document,'hidden',{configurable:true,get:()=>false});document.dispatchEvent(new Event('visibilitychange'))")
+        p.wait_for_timeout(700);self.assertFalse(p.evaluate('__tm.player.state().playing'));self.assertEqual(p.evaluate('__tm.player.state().total'),2)
+    def test_public_detail_period_picker_and_anonymous(self):
+        p=self.page;self.authenticated=False;p.goto(self.origin+'/');expect(p.locator('.stories-strip')).to_be_visible()
+        expect(p.locator('.auto-location')).to_have_count(0);p.locator('.period-chip').select_option('custom')
+        p.locator('input[aria-label="期間の開始日"]').fill('2020-01-01');p.locator('input[aria-label="期間の終了日"]').fill('2026-09-20');p.get_by_role('button',name='この期間を表示').click()
+        self.assertEqual(p.evaluate('__tm.viewerState.state().period.preset'),'custom');p.locator('.story-person[data-handle="friend"]').click();p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
+        p.locator('.tm-record-card').get_by_role('button',name='詳細を見る').click();expect(p.locator('.record-detail')).to_be_visible();self.assertFalse(p.evaluate('__tm.player.active()'))
+    def test_failed_viewer_response_is_observable(self):
+        self.viewer_failure=True;p=self.page;p.goto(self.origin+'/');expect(p.locator('.data-warning')).to_be_visible();expect(p.locator('.replay-play')).to_be_disabled();self.assertEqual(self.read_posts,[])
+    def test_compact_controls_at_mobile_widths(self):
+        p=self.page
+        for width,height in [(320,568),(375,667),(390,844)]:
+            p.set_viewport_size({'width':width,'height':height});p.goto(self.origin+'/');expect(p.locator('.auto-location')).to_be_visible()
+            for selector in ['.period-chip','.auto-location [role="switch"]']:
+                self.assertTrue(p.locator(selector).evaluate("e=>{const r=e.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}"),selector)
+            p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()');p.locator('.replay-play').click()
+            bar=p.locator('.replay-control.active').bounding_box();self.assertLessEqual(bar['height'],60);self.assertGreaterEqual(bar['x'],0);self.assertLessEqual(bar['x']+bar['width'],width)
+            for selector in ['.replay-speed','.replay-stop','.replay-progress']:
+                self.assertTrue(p.locator(selector).evaluate("e=>{const r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}"),selector)
+            p.get_by_role('button',name='再生を終了',exact=True).click()
 if __name__=='__main__':unittest.main(verbosity=2)

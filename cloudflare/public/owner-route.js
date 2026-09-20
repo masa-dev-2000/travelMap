@@ -11,7 +11,7 @@ const shortDay=r=>new Date(r.occurred_at).toLocaleDateString('ja-JP',{month:'num
 const under=(user,r)=>statusLine(user?.status,user?.status_at)||[r.category_name,ago({at:r.occurred_at,date:new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})})].filter(Boolean).join(' · ');
 export function makeOwnerRoute(map,shell){
   let rows=[],index=null,callbacks=new Map(),endpoints=[],styleReady=false,user=null,replaying=false,ghost=null,range=[];
-  const badge=el('button',{className:'route-overview',type:'button',textContent:'全ルート',hidden:true});document.querySelector('.map-stage').append(badge);
+
   const cards=mapRecordCard(map,shell);let samples=[];
   function sampleLines(){const groups=new Map();for(const p of sortPoints(samples.map(locationPoint))){if(!groups.has(p.segment))groups.set(p.segment,[]);groups.get(p.segment).push([p.lng,p.lat]);}return collection([...groups.values()].filter(coords=>coords.length>1).map(coords=>feature({type:'LineString',coordinates:coords})));}
   function sources(){
@@ -41,9 +41,9 @@ export function makeOwnerRoute(map,shell){
   }
   map.on('basemapchanging',()=>{styleReady=false;});
   map.on('style.load',()=>{styleReady=true;draw();});
-  function deselect(){index=null;badge.textContent='全ルート';draw();}
+  function deselect(){index=null;draw();}
   shell.drawer.addEventListener('viewchange',event=>{if(event.detail!=='route')deselect();});
-  function clear(){rows=[];ghost=null;callbacks.clear();index=null;badge.hidden=true;cards.hide();endpoints.forEach(m=>m.remove());endpoints=[];draw();}
+  function clear(){rows=[];ghost=null;callbacks.clear();index=null;cards.hide();endpoints.forEach(m=>m.remove());endpoints=[];draw();}
   function fit(coords,panel=false){
     if(!coords.length)return;const bounds=new gl.LngLatBounds();coords.forEach(c=>bounds.extend(c));
     const phone=innerWidth<=700,height=map.getContainer().clientHeight;
@@ -61,10 +61,9 @@ export function makeOwnerRoute(map,shell){
       const section=el('section',{className:'route-stop'});section.append(el('p',{className:'eyebrow',textContent:label}),el('time',{textContent:new Date(r.occurred_at).toLocaleString('ja-JP')}),el('h2',{textContent:r.observed_place_name||r.category_name||'記録した場所'}),el('p',{className:'memo',textContent:r.memo}));
       const button=el('button',{type:'button',textContent:'記録の詳細を開く'});button.onclick=()=>callbacks.get(r.id)?.();section.append(button);content.append(section);
     }
-    content.append(el('p',{className:'hint',textContent:'記録地点を日時順につないでいます。'}));shell.detail(content);badge.textContent='区間 '+(index+1)+' / '+(rows.length-1);
+    content.append(el('p',{className:'hint',textContent:'記録地点を日時順につないでいます。'}));shell.detail(content);
     if(move)fit([point(rows[index]),point(rows[index+1])],true);
   }
-  badge.onclick=()=>select(index??0);
   let windowSize=innerWidth+'x'+innerHeight;
   map.on('resize',()=>{const next=innerWidth+'x'+innerHeight;if(next===windowSize)return;windowSize=next;// 右ペインの開閉による地図の伸縮では視点を変えない(ウィンドウの大きさが変わった時だけ合わせ直す)
     if(index!==null)fit([point(rows[index]),point(rows[index+1])],true);else fit(rows.map(point));});
@@ -97,8 +96,8 @@ export function makeOwnerRoute(map,shell){
       pinEl.append(button);endpoints.push(new gl.Marker({element:pinEl,anchor:'center'}).setLngLat(point(r)).addTo(map));
     }
   }
-  function render(records,fallback=[]){rows=orderedRoute(records);ghost=rows.length?null:orderedRoute(fallback).at(-1)??null;index=null;badge.hidden=rows.length<2;markers();draw();}
-  return {setReplay:value=>{replaying=value;if(value){index=null;badge.textContent='全ルート';cards.hide();}else markers();badge.hidden=value||rows.length<2;draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:combineOwnerPoints(rows,samples).map(p=>({...p,openDetail:p.kind==='record'?callbacks.get(p.id):undefined})),marker:rows.length?endpoints.at(-1):undefined}),
+  function render(records,fallback=[]){rows=orderedRoute(records);ghost=rows.length?null:orderedRoute(fallback).at(-1)??null;index=null;markers();draw();}
+  return {setReplay:value=>{replaying=value;if(value){index=null;cards.hide();}else markers();draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:combineOwnerPoints(rows,samples).map(p=>({...p,openDetail:p.kind==='record'?callbacks.get(p.id):undefined})),marker:rows.length?endpoints.at(-1):undefined}),
     // 旅をまとめる範囲の強調。表示中の期間とは無関係に、渡された記録をつないで見せる
     highlight:records=>{range=orderedRoute(records).map(point);index=null;draw();if(range.length)fit(range,true);},
     setSamples:next=>{samples=next;draw();},setUser:next=>{user=next;if(!replaying)markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>[...(rows.length?rows.map(point):ghost?[point(ghost)]:[]),...samples.map(locationPoint).filter(Boolean).map(p=>[p.lng,p.lat])],count:()=>rows.length};

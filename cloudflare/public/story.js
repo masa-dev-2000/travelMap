@@ -1,84 +1,84 @@
-import {el, whoMarker, yen} from './shared.js';
+import {el,whoMarker} from './shared.js';
 import {gl} from './owner-map.js';
-// 旅の再生(ストーリー): 1人の旅を記録1件ずつ追う。地図はその地点へ動き、線がそこまで伸び、ログカード(日時・場所・カテゴリ・メモ・金額・写真・累計)が切り替わる。
-// 渡された steps だけを使う(他人は公開フィード由来、自分の旅は私的データ由来)。位置の無い記録は地図を動かさずカードだけ出す
-const SPEEDS=[['1.7','ゆっくり'],['1','ふつう'],['0.5','はやい']];
-const still=()=>matchMedia('(prefers-reduced-motion: reduce)').matches||document.visibilityState==='hidden';// 動きを減らす設定・裏のタブでは、地図は一気に移す
-export function makeStory(map,shell,{begin,end}){
-  const root=el('div',{className:'story'}),chooser=el('div',{className:'story-choose'}),player=el('div',{className:'story-player',hidden:true});
-  const progress=el('p',{className:'story-progress'}),card=el('article',{className:'story-card'}),seek=el('input',{type:'range',min:0,max:0,step:1,value:0}),controls=el('div',{className:'story-controls'});
-  const prev=el('button',{type:'button',textContent:'⏮ 前へ'}),play=el('button',{type:'button',className:'primary',textContent:'▶ 再生'}),next=el('button',{type:'button',textContent:'次へ ⏭'}),speed=el('select'),share=el('button',{type:'button',className:'story-share',textContent:'リンクをコピー',hidden:true});
-  for(const [value,label] of SPEEDS)speed.append(new Option(label,value));speed.value='1';speed.setAttribute('aria-label','再生の速さ');seek.setAttribute('aria-label','記録の位置');progress.setAttribute('role','status');
-  controls.append(prev,play,next,speed);player.append(progress,seek,controls,card,share);root.append(chooser,player);
-  let steps=[],index=0,playing=false,timer=0,frame=0,active=false,marker=null,styleReady=true,line=[],color='#216453',shareUrl=null,generation=0,currentOption=null,sequential=false,sequence=[],sequenceIndex=0;
-  const located=step=>step.lng!=null&&step.lat!=null;
-  function drawLine(coords){
-    if(!styleReady)return;const data={type:'FeatureCollection',features:coords.length>1?[{type:'Feature',geometry:{type:'LineString',coordinates:coords},properties:{}}]:[]};
-    if(map.getSource('story'))map.getSource('story').setData(data);else map.addSource('story',{type:'geojson',data});
-    if(!map.getLayer('story-line'))map.addLayer({id:'story-line',type:'line',source:'story',paint:{'line-color':color,'line-width':4,'line-opacity':.95},layout:{'line-cap':'round','line-join':'round'}});else map.setPaintProperty('story-line','line-color',color);
+import {mapRecordCard} from './map-record-card.js';
+import {validLocation} from './record-display.js';
+const SPEEDS=[.5,1,1.5,2,4];
+// One-person renderer. Queue, unread filters and authors belong to PlaybackController.
+export function makeStory(map,shell,{begin=()=>{},end=()=>{}}={}){
+  const cards=mapRecordCard(map,shell),box=el('div',{className:'replay-control'});
+  const play=el('button',{type:'button',className:'replay-play',textContent:'▶ 再生'});
+  const position=el('div',{className:'replay-seek',hidden:true});
+  const seek=el('input',{type:'range',min:0,max:0,step:1,value:0,className:'replay-progress'});seek.setAttribute('aria-label','再生位置');
+  const label=el('span',{className:'replay-date'});position.append(seek,label);
+  const speed=el('button',{type:'button',className:'replay-speed',textContent:'1.0×',hidden:true});
+  const restart=el('button',{type:'button',className:'replay-restart',textContent:'↶',hidden:true});restart.setAttribute('aria-label','最初から');
+  const stop=el('button',{type:'button',className:'replay-stop',textContent:'×',hidden:true});stop.setAttribute('aria-label','再生を終了');
+  box.append(play,position,speed,restart,stop);shell.stage.append(box);
+  let steps=[],index=0,playing=false,active=false,timer=0,seenTimer=0,generation=0,marker=null,styleReady=true,multiplier=1,data=null,callbacks={};
+  const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function updateSpeed(){speed.textContent=multiplier.toFixed(1)+'×';speed.setAttribute('aria-label',`再生速度 ${multiplier}倍。タップで変更`);}
+  updateSpeed();
+  const coords=()=>steps.slice(0,index+1).filter(s=>validLocation(s.lat,s.lng)).map(s=>[s.lng,s.lat]);
+  function draw(){
+    if(!styleReady||(map.isStyleLoaded&&!map.isStyleLoaded()))return;const line=active?coords():[],collection={type:'FeatureCollection',features:line.length>1?[{type:'Feature',geometry:{type:'LineString',coordinates:line},properties:{}}]:[]};
+    if(map.getSource('story'))map.getSource('story').setData(collection);else map.addSource('story',{type:'geojson',data:collection});
+    if(!map.getLayer('story-line'))map.addLayer({id:'story-line',type:'line',source:'story',paint:{'line-color':data?.color||'#216453','line-width':4,'line-opacity':.95},layout:{'line-cap':'round','line-join':'round'}});
+    else map.setPaintProperty('story-line','line-color',data?.color||'#216453');
   }
-  function paintCard(){
-    const step=steps[index],first=steps[0],day=Math.round((Date.parse(step.date+'T00:00:00Z')-Date.parse(first.date+'T00:00:00Z'))/86400000)+1,spent=steps.slice(0,index+1).reduce((sum,s)=>sum+(s.spent??0),0);
-    const when=step.at?new Date(step.at).toLocaleString('ja-JP',{year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'Asia/Tokyo'}):new Date(step.date+'T00:00:00+09:00').toLocaleDateString('ja-JP',{year:'numeric',month:'numeric',day:'numeric'});
-    progress.textContent=`${index+1} / ${steps.length}　${day}日目 · ここまでの支出 ${yen(spent)}`;seek.value=String(index);
-    card.replaceChildren(el('p',{className:'eyebrow',textContent:[when,step.category].filter(Boolean).join('・')}),el('h2',{textContent:step.place||'旅のひとこま'}));
-    if(step.spent!=null)card.append(el('p',{className:'spent',textContent:yen(step.spent)}));
-    if(step.memo)card.append(el('p',{className:'memo',textContent:step.memo}));
-    for(const photo of step.photos||[])card.append(el('img',{src:photo.url,alt:photo.caption||'旅の写真',loading:'lazy'}));
-    if(!located(step))card.append(el('p',{className:'hint',textContent:'この記録の位置は公開されていません（地図は動きません）'}));
-    prev.disabled=index===0;next.disabled=index===steps.length-1;
+  function point(step){return {key:`story:${data.author||data.title}:${step.id||index}`,id:step.id,kind:'record',source:step.source||data.source||'public',lat:step.lat,lng:step.lng,displayAt:step.at||null,displayDate:step.date,
+    card:{title:step.place||step.category||'旅のひとこま',memo:step.memo||'',author:data.face?.name||data.title,category:step.category||'',rating:step.rating??null,photos:step.photos||[]}};}
+  function paint(){
+    if(!active||!steps[index]||document.hidden)return;
+    clearTimeout(seenTimer);const run=generation,step=steps[index],item=point(step);
+    seek.value=String(index);seek.disabled=steps.length<2;
+    label.textContent=`${data.face?.name||data.title||''} · ${index+1}/${steps.length}`;label.title=label.textContent;
+    seek.setAttribute('aria-valuetext',`${index+1}件目 / ${steps.length}件`);
+    if(validLocation(step.lat,step.lng)){
+      marker?.setLngLat([step.lng,step.lat]);map[reduced()?'jumpTo':'easeTo']({center:[step.lng,step.lat],zoom:Math.max(7,map.getZoom()),duration:Math.round(300/multiplier),padding:0});
+    }
+    draw();cards.show(item,{openDetail:()=>{pause();const content=el('article',{className:'record-detail'});content.append(el('h2',{textContent:item.card.title}),el('p',{textContent:step.memo||''}));shell.detail(content);},onPresented:()=>{
+      // Only an actually presented card can advance read state. Hiding the tab,
+      // opening a dialog, scrubbing past it, or closing it invalidates this timer.
+      seenTimer=setTimeout(()=>{if(run===generation&&active&&cards.visible(item.key))void Promise.resolve(callbacks.onSeen?.(step)).catch(()=>{});},400);
+    }});
   }
-  // index の記録へ進む。animate のときは線を前の地点から伸ばし、地図も一緒に動かす
-  function go(target,animate=false){
-    cancelAnimationFrame(frame);index=Math.max(0,Math.min(steps.length-1,target));paintCard();if(typeof currentOption?.onSeen==='function')void currentOption.onSeen(steps[index]);
-    const step=steps[index],done=steps.slice(0,index+1).filter(located).map(s=>[s.lng,s.lat]);
-    if(!located(step)||!done.length){line=done;drawLine(line);if(done.length)marker?.setLngLat(done.at(-1));return 0;}
-    const to=done.at(-1),from=line.length&&done.length>1?done.at(-2):null,zoom=Math.max(map.getZoom(),7),phone=innerWidth<=700,padding={top:0,left:0,right:0,bottom:phone?Math.round(map.getContainer().clientHeight*.35):0};
-    if(!animate||still()||!from){line=done;drawLine(line);marker?.setLngLat(to);map.jumpTo({center:to,zoom,padding});return 0;}
-    const duration=900*Number(speed.value),start=performance.now(),run=generation;map.easeTo({center:to,zoom,padding,duration});
-    const tick=now=>{if(run!==generation)return;const k=Math.min(1,(now-start)/duration),at=[from[0]+(to[0]-from[0])*k,from[1]+(to[1]-from[1])*k];line=[...done.slice(0,-1),at];drawLine(line);marker?.setLngLat(at);if(k<1)frame=requestAnimationFrame(tick);else line=done;};
-    frame=requestAnimationFrame(tick);return duration;
+  function setPlay(){play.textContent=active?(playing?'⏸':'▶'):'▶ 再生';play.setAttribute('aria-label',active?(playing?'一時停止':'再生を再開'):'再生');}
+  function schedule(){
+    clearTimeout(timer);if(!playing||document.hidden)return;const run=generation;
+    timer=setTimeout(()=>{if(run!==generation||!playing||document.hidden)return;
+      if(index>=steps.length-1){pause();callbacks.onComplete?.();return;}
+      index++;paint();schedule();
+    },Math.max(700,((steps[index]?.photos?.length||steps[index]?.memo)?2600:1500)/multiplier));
   }
-  // 「移動」だけの記録は短く、メモや写真のある記録は長めに止まる
-  const dwell=step=>((step.photos?.length||step.memo)?2600:step.category==='移動'?700:1500)*Number(speed.value);
-  function schedule(wait){clearTimeout(timer);timer=setTimeout(()=>{if(!playing)return;if(index>=steps.length-1){if(sequential&&sequenceIndex<sequence.length-1){pause();void run(sequence[++sequenceIndex]);return;}pause();play.textContent='▶ もう一度';return;}const moved=go(index+1,true);schedule(moved+dwell(steps[index]));},wait);}
-  function start(){if(index>=steps.length-1)go(0);playing=true;play.textContent='⏸ 一時停止';schedule(dwell(steps[index]));}
-  function pause(){playing=false;clearTimeout(timer);play.textContent='▶ 再生';}
-  function manual(target){pause();go(target,false);}
-  play.onclick=()=>playing?pause():start();prev.onclick=()=>manual(index-1);next.onclick=()=>manual(index+1);seek.oninput=()=>manual(Number(seek.value));
-  speed.onchange=()=>{if(playing)schedule(dwell(steps[index]));};
-  share.onclick=async()=>{try{await navigator.clipboard.writeText(shareUrl);share.textContent='コピーしました';}catch{share.textContent=shareUrl;}setTimeout(()=>{share.textContent='リンクをコピー';},2500);};
-  document.addEventListener('keydown',event=>{
-    if(!active||player.hidden||event.target.closest?.('input,select,textarea,dialog')||event.metaKey||event.ctrlKey||event.altKey)return;
-    if(event.key==='ArrowLeft'){event.preventDefault();manual(index-1);}else if(event.key==='ArrowRight'){event.preventDefault();manual(index+1);}else if(event.key===' '){event.preventDefault();play.click();}
-  });
-  function finish(){
-    if(!active)return;active=false;generation++;pause();cancelAnimationFrame(frame);marker?.remove();marker=null;line=[];steps=[];
-    if(map.getSource('story'))map.getSource('story').setData({type:'FeatureCollection',features:[]});
-    shell.stage.classList.remove('story-on');if(shareUrl&&new URL(location.href).searchParams.has('play'))history.replaceState(null,'','/');shareUrl=null;end();
+  function pause(){playing=false;clearTimeout(timer);map.stop();setPlay();}
+  function resume(){if(!active||document.hidden)return;playing=true;setPlay();paint();schedule();}
+  function finish(notify=true){
+    const was=active,oldCallbacks=callbacks;generation++;clearTimeout(timer);clearTimeout(seenTimer);playing=false;active=false;callbacks={};
+    cards.hide();marker?.remove();marker=null;steps=[];index=0;data=null;map.stop();draw();
+    position.hidden=speed.hidden=restart.hidden=stop.hidden=true;box.classList.remove('active');shell.stage.classList.remove('replay-on');setPlay();
+    if(was)end();if(was&&notify)oldCallbacks.onStop?.();
   }
-  shell.drawer.addEventListener('viewchange',event=>{if(event.detail!=='story')finish();});
-  map.on('basemapchanging',()=>{styleReady=false;});
-  map.on('style.load',()=>{styleReady=true;if(active)drawLine(line);});
-  function enter(title){if(!active){active=true;begin();shell.stage.classList.add('story-on');}shell.story(root,title);}
-  // options: [{label,note,load:async()=>({title,steps,face,color,shareUrl})}]。1つならすぐ再生、複数なら選ぶ
-  async function run(option){
-    currentOption=option;const run=++generation;chooser.replaceChildren(el('p',{className:'hint',textContent:'読み込み中…'}));player.hidden=true;
-    let data;try{data=await option.load();}catch(error){chooser.replaceChildren(el('p',{className:'hint',textContent:error.message}));return;}
-    if(run!==generation||!active)return;
-    if(!data.steps.length){chooser.replaceChildren(el('p',{className:'hint',textContent:'再生できる記録がありません'}));return;}
-    steps=data.steps;color=data.color||'#216453';shareUrl=data.shareUrl||null;share.hidden=!shareUrl;if(shareUrl)history.replaceState(null,'',shareUrl);
-    chooser.replaceChildren();player.hidden=false;seek.max=String(steps.length-1);line=[];shell.story(root,data.title);
-    marker?.remove();const pin=el('div',{className:'who-pin story-pin'}),face=el('div',{className:'who-button'});face.append(whoMarker({...data.face,color}));pin.append(face);
-    const firstSpot=steps.find(located);marker=firstSpot?new gl.Marker({element:pin,anchor:'center'}).setLngLat([firstSpot.lng,firstSpot.lat]).addTo(map):null;
-    go(0);start();
+  function load(next,options={}){
+    finish(false);if(!next?.steps?.length)return false;
+    data=structuredClone(next);steps=data.steps;callbacks=options;begin();active=true;index=0;generation++;
+    shell.stage.classList.add('replay-on');box.classList.add('active');position.hidden=speed.hidden=restart.hidden=stop.hidden=false;
+    seek.max=String(steps.length-1);
+    const first=steps.find(s=>validLocation(s.lat,s.lng));
+    if(first){const node=el('div',{className:'who-pin story-pin'}),face=el('div',{className:'who-button'});face.append(whoMarker({...data.face,color:data.color||'#216453'}));node.append(face);marker=new gl.Marker({element:node}).setLngLat([first.lng,first.lat]).addTo(map);}
+    // Reduced-motion users advance records explicitly, without automatic camera jumps.
+    restart.textContent=reduced()?'›':'↶';restart.setAttribute('aria-label',reduced()?'次の記録':'最初から');
+    playing=!reduced()&&!document.hidden;setPlay();paint();schedule();return true;
   }
-  function open(title,options,config={}){
-    finishQuiet();enter(title);player.hidden=true;sequential=!!config.sequential;sequence=options;sequenceIndex=0;
-    if(options.length===1||sequential){run(options[0]);return;}
-    chooser.replaceChildren(el('p',{className:'hint',textContent:'どの旅を再生しますか？'}));
-    for(const option of options){const button=el('button',{type:'button',className:'story-option'});button.append(el('strong',{textContent:option.label}),el('span',{textContent:option.note||''}));button.onclick=()=>run(option);chooser.append(button);}
-  }
-  function finishQuiet(){generation++;pause();currentOption=null;sequential=false;sequence=[];sequenceIndex=0;cancelAnimationFrame(frame);marker?.remove();marker=null;line=[];steps=[];if(map.getSource('story'))map.getSource('story').setData({type:'FeatureCollection',features:[]});}
-  return {open,finish,active:()=>active,state:()=>({active,playing,index,total:steps.length,step:steps[index]||null}),go:manual};
+  play.onclick=()=>active?(playing?pause():resume()):box.dispatchEvent(new Event('playrequest'));
+  speed.onclick=()=>{multiplier=SPEEDS[(SPEEDS.indexOf(multiplier)+1)%SPEEDS.length];updateSpeed();if(playing)schedule();};
+  const go=n=>{if(!active)return;pause();generation++;clearTimeout(seenTimer);index=Math.max(0,Math.min(steps.length-1,Math.round(Number(n)||0)));paint();};
+  seek.oninput=()=>go(seek.value);restart.onclick=()=>go(reduced()?index+1:0);stop.onclick=()=>finish();
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(seenTimer);pause();}else if(active)paint();});
+  window.addEventListener('pagehide',()=>finish());document.addEventListener('tm:auth-lost',()=>finish());
+  shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&active)finish();});
+  map.on('basemapchanging',()=>{styleReady=false;clearTimeout(seenTimer);pause();cards.hide();});
+  map.on('style.load',()=>{styleReady=true;draw();if(active)paint();});
+  return {load,finish,pause,resume,go,seek:progress=>go(progress*(steps.length-1)),active:()=>active,
+    setAvailable:yes=>{play.disabled=!yes&&!active;},onPlay:fn=>box.addEventListener('playrequest',fn),
+    state:()=>({active,playing,index,total:steps.length,progress:steps.length>1?index/(steps.length-1):0,speed:multiplier,step:steps[index]||null,author:data?.author||null})};
 }

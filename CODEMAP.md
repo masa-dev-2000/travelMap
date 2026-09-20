@@ -27,7 +27,7 @@
 - `cloudflare/public/panel-me.js`: ログイン中だけ読み込む私的記録、旅、分類、収支、公開設定、プロフィール。
 - `cloudflare/public/owner-map.js` / `owner-route.js`: MapLibre上の本人用地点・経路・区間選択。
 - `cloudflare/public/route.js`: 公開記録の経路データ構築。
-- `cloudflare/public/replay.js`: 記録順に正規化した旅のリプレイ。
+- `cloudflare/public/story.js`: 全再生入口が使う1人用プレイヤー。小型バー・速度タップ・記録カード。旧 `replay.js` は撤去。
 - `cloudflare/public/input-flow.js` / `input-viewport.js`: 入力完了判定とフォーム内スクロール。iPhone実機での合格は別途確認。
 - `cloudflare/public/record-save.js`: 保存と写真変換のロック、本文/写真の固定、同じ保存キーとactivity IDでの再試行。
 - `cloudflare/public/auto-location.js`: 地図/開始/入力画面の自動位置UIと共通navigateWithCapture。リンク・記録ボタンを同じ引き継ぎへ通す。
@@ -86,11 +86,17 @@ CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジ
 - 本番D1は初期投入由来の既存スキーマを持つが、`d1_migrations`台帳は空。0011/0012はSQLファイルを直接実行した。Wranglerの`migrations apply`は既存の0001以降も未適用と表示するため、そのまま実行しない。
 - Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。実本番IDを含む `wrangler.production.jsonc` はGit管理外のため、本番作業前に実行環境で存在・対象アカウント/D1/R2を照合する。
 
-## Issues #9〜#13（実装ブランチ）
+## Issues #9〜#13（実装ブランチ・レビュー修正）
+
+- 正本・全11指摘の対応と検証条件: [docs/issues-9-13-implementation.md](docs/issues-9-13-implementation.md)
+- `cloudflare/src/viewer-api.ts`: 公開と同じ可視性条件で個人用feed・mute・既読を管理。
+- `0015-stable-public-order.sql`: 変更される日付ではなく初回可視順を保存。既読をDBで単調更新、削除から寿命を分離。
+- `viewer-settings.js`: 設定のミュート操作・失敗復元。
+- `viewer-api.test.ts` / `viewer-state.test.ts`: 公開順・認可・削除・ミュート・遅い応答・再生対象。
 
 - `viewer-state.js`: 選択人物・期間・ミュート・未読のブラウザ共通状態。
 - `stories-strip.js`: 地図上のStories型人物列。既読も残し、未読をリング表示。
-- `playback-controller.js`: 誰を再生するかを決定し、1人の再生は`story.js`へ委譲。
+- `playback-controller.js`: 未読／選択期間の人物キュー、スナップショット、非同期世代、既読通知。1人の描画は `story.js`。
 - `0013-user-mutes.sql`: viewer/author単位のミュート。
 - `0014-public-read-cursors.sql`: viewer/author単位の公開記録既読カーソル。
 - 公開フィードはviewer-neutralのまま維持し、個人のミュート/未読は`/api/private/viewer-feed`で扱う。

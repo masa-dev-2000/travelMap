@@ -581,3 +581,9 @@ test('viewer social endpoints stay private and validate mute targets',async()=>{
   assert.equal((await handle(request('/api/private/read-cursor'),env)).status,401);
   assert.equal((await owner('/api/private/mutes',{handle:'missing-user',muted:true})).status,404);
 });
+
+test('viewer feed/read/mute use actual Worker authentication and Origin gates',async()=>{
+ for(const path of ['viewer-feed','mutes','read-cursor'])assert.equal((await handle(request('/api/private/'+path),env)).status,401);
+ for(const path of ['mutes','read-cursor'])assert.equal((await owner('/api/private/'+path,{},undefined,'https://evil.test')).status,403);
+ const response=await owner('/api/private/viewer-feed');assert.equal(response.status,200);assert.match(response.headers.get('Cache-Control'),/no-store/);const data=await response.json();assert.ok(Array.isArray(data.entries)&&Array.isArray(data.muted));
+});

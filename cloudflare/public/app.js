@@ -1,70 +1,87 @@
-import {el,api as apiPrivate} from '/shared.js';
+import {el,api} from '/shared.js';
 import {mapShell} from '/map-shell.js';
 import {makeOwnerMap} from '/owner-map.js';
 import {makeOwnerRoute} from '/owner-route.js';
 import {makeEveryone} from '/panel-everyone.js';
-import {makeReplay} from '/replay.js';
 import {makeStory} from '/story.js';
 import {mountAutoLocation,navigateWithCapture} from '/auto-location.js';
 import {makeLocationMap} from '/location-map.js';
 import {makeViewerState} from '/viewer-state.js';
 import {makeStoriesStrip} from '/stories-strip.js';
 import {makePlaybackController} from '/playback-controller.js';
-// 1つの地図ページ。未ログインは公開データだけ、ログインすると自分の操作(じぶん・＋・設定)が増える
+import {makeViewerSettings} from '/viewer-settings.js';
 const $=selector=>document.querySelector(selector),message=$('#message');
 let session={user:null};
 try{const response=await fetch('/api/public/session',{cache:'no-store'});if(response.ok)session=await response.json();}catch{}
-if(session.needs_signup)location.replace('/signup/');// 同意前のアカウント(通常はサーバが先に転送する)
-const me=session.user;
+if(session.needs_signup)location.replace('/signup/');
+const me=session.user,settings=$('#settings-dialog');
 for(const dialog of document.querySelectorAll('dialog'))document.body.append(dialog);
-const peopleNode=el('div',{className:'people'}),timelineNode=el('div');
-const groups=[];
-if(me)groups.push(
-  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#me-filters'),$('#activities').closest('section')]},
-  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
-  {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[$('#money-panel'),$('#trip-form').closest('details')],action:()=>{$('#settings-dialog').showModal();return true;}}
-);
-const shell=mapShell(groups);
-if(!me&&!session.authenticated){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.title='Googleアカウントで登録できます';login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'はじめる'}),el('span',{textContent:'/ ログイン'}),el('span',{className:'rail-note',textContent:'Googleアカウントで登録できます'}));shell.fit.after(login);}
-else if(!me&&session.authenticated){const status=el('div',{className:'rail-login'});status.setAttribute('aria-label','Googleログイン済み');status.append(el('span',{className:'rail-icon',textContent:'✓'}),el('span',{textContent:'ログイン済み'}));shell.fit.after(status);}
-const dataWarning=el('aside',{className:'data-warning',hidden:true});dataWarning.setAttribute('role','status');dataWarning.setAttribute('aria-live','polite');
-dataWarning.append(el('strong',{textContent:'記録データを取得できません'}),el('span',{textContent:session.authenticated?'ログイン済みです。地図は利用できます。':'地図は利用できます。記録は復旧後に表示されます。'}),el('a',{href:'/',textContent:'再読み込み'}));shell.stage.append(dataWarning);
-const map=makeOwnerMap();
-shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの開閉で地図の幅が変わる。続く fit が新しい幅で計算されるよう、その場で合わせる
-const route=makeOwnerRoute(map,shell);
-let noticeTimer,mine=null,locations=null,story=null;
-function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
-const viewerState=makeViewerState();
-const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:false,onFilter:filter=>{replay.finish();story?.finish();mine?.setFilter(filter);locations?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle),onPlay:handle=>playPerson(handle)});
-const JAPAN={center:[137.5,37.5],zoom:4.3};
-function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);if(everyone.count()&&!route.count()&&!everyone.shownCount())notify('この期間の記録はありません。期間を広げると表示されます');}
-shell.fit.onclick=()=>{shell.hide();fitRecords();};
-const replay=makeReplay(map,shell,{tracks:()=>[route.track(),...everyone.tracks()],begin:()=>{story?.finish();shell.hide();route.setReplay(true);everyone.setReplay(true);fitRecords();},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
-let playback=null;
-// 旅の再生(ログ付き)。再生中は、ほかの線とマーカーを隠す
-story=makeStory(map,shell,{begin:()=>{replay.finish();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
-// trip: undefined=選択肢を出す、''=すべての公開記録、名前=その旅(共有URL用)
-function playPerson(handle,trip){
-  const options=everyone.storyOptions(handle);if(!options.length){notify('この人はいま旅モード中ではないか、公開している記録がありません');return;}
-  if(handle!==me?.handle)mine?.visited?.(handle);
-  const chosen=trip===undefined?options:options.filter(option=>option.trip===trip);story.open('旅を再生',chosen.length?chosen:options.slice(-1));
+// Move actual profile DOM, not just its navigation label. Preserve all owned-data
+// forms under Profile; settings actions never leave them in an unreachable drawer.
+const profile=$('#settings-panel'),form=$('#profile-form');
+const account=el('section',{className:'sheet-section'});account.append($('#logout'),profile.querySelector('a[href="/terms"]').closest('p'));settings.append(account);
+const edit=el('details',{className:'profile-edit'});edit.append(el('summary',{textContent:'プロフィールを編集'}),form);profile.append(edit);
+const profileBio=el('p',{id:'profile-bio'});edit.before(profileBio);
+const login=()=>el('a',{className:'quick-record',href:'/auth/google?next=%2F',textContent:'ログインして利用する'});
+const groups=[
+  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),$('#me-filters'),$('#money-panel'),$('#trip-form').closest('details'),$('#activities').closest('section')]:[login()]},
+  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:me?[el('a',{className:'quick-record',href:'/admin/start/',textContent:'記録をはじめる'}),$('#add-forms')]:[login()],action:()=>{if(me&&innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
+  {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[],action:()=>{player.pause();settings.showModal();void viewerSettings.render();return true;}}
+];
+if(!me){
+  profile.remove();
+  for(const section of settings.querySelectorAll('section'))if(!section.querySelector('#map-style-settings,#mute-settings'))section.hidden=true;
+  account.hidden=false;account.replaceChildren(login());
 }
-window.__tm={everyone,route,shell,replay,story,viewerState};// 画面確認用(コンソールから状態を読む)
-const mapStyleSettings=$('#map-style-settings');if(mapStyleSettings){const move=document.querySelector('.basemap-control');if(move){move.open=true;mapStyleSettings.append(move);}}
-const stories=me?makeStoriesStrip(shell.stage,{state:viewerState,onSelect:handle=>{viewerState.select(handle);everyone.selectPerson?.(handle);stories.render(everyone.viewerUsers?.()||[]);}}):null;
-async function refreshViewer(){if(!me)return;try{const data=await apiPrivate('viewer-feed');viewerState.setMuted(data.muted||[]);viewerState.setUnread(data.users||[]);stories.render((data.users||[]).map(u=>({...u,self:me.handle})));}catch{}}
-await everyone.ready;
-const dataAvailable=session.data_available!==false&&everyone.available();dataWarning.hidden=dataAvailable;replay.setAvailable(dataAvailable);
-if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいません');void refreshViewer();
+const shell=mapShell(groups),map=makeOwnerMap({settingsSlot:$('#map-style-settings')}),route=makeOwnerRoute(map,shell);
+shell.drawer.addEventListener('viewchange',()=>map.resize());
+let preset='7';try{const saved=localStorage.getItem('travelmap.period');if(['7','30','90','all'].includes(saved))preset=saved;}catch{}
+const viewerState=makeViewerState({self:me?.handle,period:preset});
+let mine=null,locations=null,noticeTimer,authEpoch=0;
+function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
+const player=makeStory(map,shell,{begin:()=>{shell.hide();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
+async function markRead(step){
+  if(document.hidden||!step.publicEntryId||viewerState.state().muted.has(step.author))return;
+  const epoch=authEpoch;
+  if(!me){viewerState.markSeen(step.author,step.publication_seq);return;}
+  const result=await api('read-cursor',{entry_id:step.publicEntryId});
+  if(epoch===authEpoch)viewerState.markSeen(result.author,Number(result.last_seen_seq));
+}
+const everyone=makeEveryone(map,shell,{state:viewerState,authenticated:!!me,notify,
+  onFilter:filter=>{mine?.setFilter(filter);locations?.setFilter(filter);queueMicrotask(()=>{if(!player.active())fitRecords();});},
+  onOpenPerson:handle=>{if(handle!==me?.handle)mine?.visited?.(handle);},
+  onPlay:()=>void playback.play(),onRead:markRead});
+const dataWarning=el('aside',{className:'data-warning',hidden:true});dataWarning.setAttribute('role','status');dataWarning.textContent='人物情報を取得できません。地図は利用できます。';shell.stage.append(dataWarning);
+viewerState.subscribe(s=>{dataWarning.hidden=!s.error;player.setAvailable(s.ready&&!s.error);});
+const stories=makeStoriesStrip(shell.stage,{state:viewerState});
+function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo({center:[137.5,37.5],zoom:4.3});}
+shell.fit.onclick=()=>{shell.hide();fitRecords();};
+function choose(title,options){return new Promise(resolve=>{
+  if(!options.length){resolve(null);return;}
+  const list=el('div',{className:'playback-choices'});let done=false;
+  const finish=value=>{if(done)return;done=true;shell.drawer.removeEventListener('viewchange',closed);resolve(value);};
+  const closed=event=>{if(event.detail!=='playback-options')finish(null);};
+  for(const option of options){const button=el('button',{type:'button',textContent:option.label});button.onclick=()=>{finish(option);shell.hide();};list.append(button);}
+  shell.view('playback-options',list,title);shell.drawer.addEventListener('viewchange',closed);
+});}
+const playback=makePlaybackController({state:viewerState,player,refresh:options=>everyone.reload(options),loadGroup:group=>everyone.groupData(group),markRead,notify,choose});
+player.onPlay(()=>void playback.play());
+const viewerSettings=makeViewerSettings({state:viewerState,reload:()=>everyone.reload(),cancelReload:everyone.cancelReload,notify,authenticated:!!me,slot:$('#mute-settings')});
+$('#close-settings').onclick=()=>settings.close();settings.addEventListener('click',event=>{if(event.target===settings)settings.close();});
+window.__tm={viewerState,everyone,route,shell,player,playback,stories};
+await everyone.ready;player.setAvailable(everyone.available());
+if(me){
+  const {startMe}=await import('/panel-me.js');
+  mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>void playback.openOptions(title,options)});
+  void mountAutoLocation(shell.stage,{compact:true,onError:notify});
+  locations=makeLocationMap(route,{handle:me.handle,filter:()=>everyone.filter(),notify});void locations.refresh();
+  mine.setFilter(everyone.filter());
+}else fitRecords();
 const shared=new URLSearchParams(location.search);
-if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});void mountAutoLocation(shell.stage);locations=makeLocationMap(route,{handle:me.handle,filter:()=>everyone.filter(),notify});void locations.refresh();}
-else if(!shared.get('play'))fitRecords();
-if(me){playback=makePlaybackController({state:viewerState,story,notify,
-  loadUser:async(handle)=>{const options=everyone.storyOptions(handle);if(!options.length)throw new Error('この期間に再生できる記録がありません');return options.at(-1);},
-  loadUnread:async()=>{const data=await apiPrivate('viewer-feed'),users=data.users.filter(u=>u.has_unread);return users.flatMap(u=>everyone.storyOptions(u.handle).slice(-1));},
-  markRead:step=>step?.id?apiPrivate('read-cursor',{entry_id:step.id}).then(refreshViewer):Promise.resolve()
-});const playButton=document.querySelector('.replay-play');if(playButton)playButton.onclick=()=>playback.play();}
-// 共有URL /?play=<handle>&trip=<旅名>: 公開データだけで、その再生を始める
-if(shared.get('play'))playPerson(shared.get('play'),shared.get('trip')??'');
-
-document.addEventListener('tm:auth-lost',()=>{replay.finish();story.finish();route.clear();route.setSamples([]);document.querySelector('#activities')?.replaceChildren();});
+if(shared.get('play')){
+  const handle=shared.get('play'),trip=shared.get('trip')??'',options=everyone.storyOptions(handle).filter(o=>o.trip===trip);
+  if(options.length)void playback.openOptions('旅を再生',options,{publicEntries:true});else notify('この人の公開記録はないか、ミュート中です');
+}
+// A return to the visible tab refreshes metadata, but never auto-resumes playback.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void everyone.reload();});
+document.addEventListener('tm:auth-lost',()=>{authEpoch++;playback.stop();viewerState.clear();route.clear();route.setSamples([]);$('#activities')?.replaceChildren();});
