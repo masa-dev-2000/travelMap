@@ -40,6 +40,7 @@ const JAPAN={center:[137.5,37.5],zoom:4.3};
 function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);if(everyone.count()&&!route.count()&&!everyone.shownCount())notify('この期間の記録はありません。期間を広げると表示されます');}
 shell.fit.onclick=()=>{shell.hide();fitRecords();};
 const replay=makeReplay(map,shell,{tracks:()=>[route.track(),...everyone.tracks()],begin:()=>{story?.finish();shell.hide();route.setReplay(true);everyone.setReplay(true);fitRecords();},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
+let playback=null;
 // 旅の再生(ログ付き)。再生中は、ほかの線とマーカーを隠す
 story=makeStory(map,shell,{begin:()=>{replay.finish();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 // trip: undefined=選択肢を出す、''=すべての公開記録、名前=その旅(共有URL用)
@@ -58,6 +59,11 @@ if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいま
 const shared=new URLSearchParams(location.search);
 if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});void mountAutoLocation(shell.stage);locations=makeLocationMap(route,{handle:me.handle,filter:()=>everyone.filter(),notify});void locations.refresh();}
 else if(!shared.get('play'))fitRecords();
+if(me){playback=makePlaybackController({state:viewerState,story,notify,
+  loadUser:async(handle)=>{const options=everyone.storyOptions(handle);if(!options.length)throw new Error('この期間に再生できる記録がありません');return options.at(-1);},
+  loadUnread:async()=>{const data=await apiPrivate('viewer-feed'),users=data.users.filter(u=>u.has_unread);return users.flatMap(u=>everyone.storyOptions(u.handle).slice(-1));},
+  markRead:step=>step?.id?apiPrivate('read-cursor',{entry_id:step.id}).then(refreshViewer):Promise.resolve()
+});const playButton=document.querySelector('.replay-play');if(playButton)playButton.onclick=()=>playback.play();}
 // 共有URL /?play=<handle>&trip=<旅名>: 公開データだけで、その再生を始める
 if(shared.get('play'))playPerson(shared.get('play'),shared.get('trip')??'');
 
