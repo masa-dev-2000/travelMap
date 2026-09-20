@@ -1,4 +1,5 @@
 import {api,el} from '/shared.js';
+import {createRecordSave} from '/record-save.js';
 import {installInputFlow} from '/input-flow.js';
 import {mountAutoLocation} from '/auto-location.js';
 let flow=null,photoGeneration=0;
@@ -8,7 +9,7 @@ const MAX_EDGE=1600,MAX_BYTES=8*1024*1024,QUICK_COUNT=4;
 const DEFAULT_ORDER=['食費','その他','移動','交通費','観光費'];
 const NO_PAYMENT=new Set(['移動','起床','就寝']);
 const calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
-let publishDefault=false,categories=[],selectedId=null,expenseNeeded=false,startedAt,position=null,watchId=null,photos=[],rating=null,requestKey=null,moneyOpen=false;
+let publishDefault=false,categories=[],selectedId=null,expenseNeeded=false,startedAt,position=null,watchId=null,photos=[],rating=null,moneyOpen=false;
 
 function store(key,value){try{localStorage.setItem('record:'+key,typeof value==='string'?value:JSON.stringify(value));}catch{}}
 function load(key,fallback=null){try{const value=localStorage.getItem('record:'+key);return value===null?fallback:JSON.parse(value);}catch{return fallback;}}
@@ -114,19 +115,19 @@ async function toImage(file){
 $('#photo').onchange=async event=>{
   const files=[...event.target.files];event.target.value='';
   if(!files.length)return;
+  const finish=saver.beginPhotos();if(!finish)return;
   const ticket=flow.photoTicket(),run=photoGeneration;let added=0;
-  save.disabled=true;$('#photo').disabled=true;$('#photo-open').disabled=true;
   try{
     for(const file of files){
       try{
         const blob=await toImage(file);if(run!==photoGeneration)continue;
         const url=URL.createObjectURL(blob),photo={blob,url};photos.push(photo);added++;
         const figure=el('figure'),remove=el('button',{type:'button',textContent:'×'});remove.setAttribute('aria-label','写真を外す');
-        remove.onclick=()=>{photos=photos.filter(item=>item!==photo);URL.revokeObjectURL(url);figure.remove();};
+        remove.onclick=()=>{if(saver.state().saving||saver.state().pending)return;photos=photos.filter(item=>item!==photo);URL.revokeObjectURL(url);figure.remove();};
         figure.append(el('img',{src:url,alt:'追加した写真'}),remove);$('#previews').append(figure);
       }catch(error){if(run===photoGeneration)notify(`写真を読み込めません：${error.message}`);}
     }
-  }finally{save.disabled=false;$('#photo').disabled=false;$('#photo-open').disabled=false;}
+  }finally{finish();}
   if(added&&run===photoGeneration)flow.photoDone(ticket);
 };
 
@@ -140,7 +141,7 @@ function reset(){
   photos=[];$('#previews').replaceChildren();
   rating=null;paintStars();
   amount.value='';$('#memo').value='';$('#place').value='';
-  requestKey=null;notify('');
+  notify('');
   if(selectedId)choose(selectedId);else paintMoney();
   locate();
 }
@@ -171,49 +172,40 @@ async function celebrate(text){
   done.hidden=true;
 }
 
+// Keep the automatic-location OFF control outside this lock.
+function paintSaveState(state){
+  const locked=state.saving||state.pending;
+  for(const node of form.querySelectorAll('.top input,.top button,.card input,.card textarea,.card select,.card button,.bottom input'))node.disabled=locked;
+  $('#photo').disabled=$('#photo-open').disabled=locked||state.processing>0;
+  save.disabled=!state.canSave;
+  if(state.saving)save.textContent='保存中…';
+  else if(state.pending)save.textContent=state.activityId?'写真・公開を再試行':'同じ内容で再試行';
+  else paintMoney();
+}
+const saver=createRecordSave({
+  create:(body,key)=>api('activities',body,key),
+  upload:async(id,photo,index,total)=>{
+    save.textContent=`写真を送信中… ${index+1}/${total}`;
+    const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:id,purpose:'photo'}),{method:'POST',headers:{'Content-Type':photo.blob.type},body:photo.blob});
+    if(!response.ok)throw new Error('写真を送信できません');return response.json();
+  },
+  publish:(op,key)=>api('public-entries',{activity_id:op.id,date:op.date,place_name:op.body.observed_place_name,memo:op.body.memo,latitude:op.body.latitude,longitude:op.body.longitude,confirmed:true,photo_ids:op.photos.map((_,i)=>op.uploaded.get(i))},key),
+  onState:paintSaveState,
+});
 form.onsubmit=async event=>{
   event.preventDefault();
-  if(save.disabled)return;
+  if(!saver.state().canSave)return;
   if(!selectedId){notify('カテゴリを選んでください');return;}
-  document.activeElement?.blur();
-  const value=amount.value,label=save.textContent;
-  save.disabled=true;save.textContent='保存中…';notify('');
-  const body={
-    category_id:selectedId,trip_id:null,
-    occurred_at:startedAt.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
-    memo:$('#memo').value,observed_place_name:$('#place').value||null,
-    latitude:position?.latitude??null,longitude:position?.longitude??null,rating,
-    publish:$('#publish').checked,
-  };
-  if(value!=='')body.transaction={category_id:expense.value,amount_minor:Number(value),currency:'JPY',minor_unit:0};
-  requestKey??=crypto.randomUUID();
+  document.activeElement?.blur();notify('');
+  const body={category_id:selectedId,trip_id:null,occurred_at:startedAt.toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,
+    memo:$('#memo').value,observed_place_name:$('#place').value||null,latitude:position?.latitude??null,longitude:position?.longitude??null,rating,publish:$('#publish').checked};
+  if(amount.value!=='')body.transaction={category_id:expense.value,amount_minor:Number(amount.value),currency:'JPY',minor_unit:0};
   try{
-    const {id}=await api('activities',body,requestKey);
-    requestKey=null;
-    const usage=load('usage',{});usage[selectedId]=(usage[selectedId]??0)+1;store('usage',usage);
-    let failed=0;const photoIds=[];
-    for(const [index,photo] of photos.entries()){
-      save.textContent=`写真を送信中… ${index+1}/${photos.length}`;
-      try{
-        const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:id,purpose:'photo'}),{method:'POST',headers:{'Content-Type':photo.blob.type},body:photo.blob});
-        if(response.ok)photoIds.push((await response.json()).id);else failed++;
-      }catch{failed++;}
-    }
-    // 公開する記録は、送れた写真も公開ページへ載せる
-    if(body.publish&&photoIds.length){
-      try{await api('public-entries',{activity_id:id,date:startedAt.toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}),place_name:body.observed_place_name,memo:body.memo,latitude:body.latitude,longitude:body.longitude,confirmed:true,photo_ids:photoIds});}
-      catch{failed+=photoIds.length;}
-    }
-    const summary=`${nameOf(selectedId)}${body.publish?' · 公開':''} · 今日 ${todayCount()} 件目`;
-    reset();renderCategories();
-    save.disabled=false;
-    await celebrate(summary);
-    if(failed)notify(`写真${failed}枚は送信できませんでした。一覧から添付し直せます`);
-  }catch(error){
-    // 入力は残す。同じ送信キーで再送するので二重保存にならない
-    notify(`${error.message}（入力は残っています）`);
-    save.disabled=false;save.textContent=label;
-  }
+    const result=await saver.run({body,photos,date:startedAt.toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'})});if(!result)return;
+    const usage=load('usage',{});usage[result.body.category_id]=(usage[result.body.category_id]??0)+1;store('usage',usage);
+    const summary=`${nameOf(result.body.category_id)}${result.body.publish?' · 公開':''} · 今日 ${todayCount()} 件目`;
+    reset();renderCategories();await celebrate(summary);
+  }catch(error){notify(`${error.message}（入力・写真は残っています）`);}
 };
 
 
