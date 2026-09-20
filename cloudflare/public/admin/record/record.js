@@ -1,4 +1,7 @@
 import {api,el} from '/shared.js';
+import {installInputFlow} from '/input-flow.js';
+import {mountAutoLocation} from '/auto-location.js';
+let flow=null,photoGeneration=0;
 const $=selector=>document.querySelector(selector);
 const form=$('#quick'),message=$('#message'),save=$('#save'),more=$('#more'),expense=$('#expense'),amount=$('#amount');
 const MAX_EDGE=1600,MAX_BYTES=8*1024*1024,QUICK_COUNT=4;
@@ -23,14 +26,14 @@ function renderCategories(){
   for(const item of quick){
     const button=el('button',{type:'button',textContent:item.name});
     button.dataset.id=item.id;button.setAttribute('role','radio');
-    button.onclick=()=>choose(item.id);
+    button.onclick=()=>{choose(item.id);flow?.go('rating');};
     node.append(button);
   }
   const list=$('#sheet-list');list.replaceChildren();
   for(const item of categories)if(!quick.includes(item)){
     const button=el('button',{type:'button',textContent:item.name});
     button.dataset.id=item.id;button.setAttribute('role','radio');
-    button.onclick=()=>{choose(item.id);closeSheet();};
+    button.onclick=()=>{choose(item.id);closeSheet(true);};
     list.append(button);
   }
   paintCategory();
@@ -52,9 +55,9 @@ function choose(id){
 }
 // ほか：画面内の選択パネル（どの端末でも同じ表示）
 function openSheet(){$('#sheet').hidden=false;more.setAttribute('aria-expanded','true');($('#sheet-list [aria-checked=true]')||$('#sheet-list button'))?.focus();}
-function closeSheet(){$('#sheet').hidden=true;more.setAttribute('aria-expanded','false');more.focus();}
+function closeSheet(selected=false){$('#sheet').hidden=true;more.setAttribute('aria-expanded','false');if(selected===true)flow?.go('rating');else{more.focus({preventScroll:true});flow?.viewport.reveal(more);}}
 more.onclick=openSheet;
-$('#sheet-close').onclick=closeSheet;
+$('#sheet-close').onclick=()=>closeSheet();
 $('#sheet').onclick=event=>{if(event.target===event.currentTarget)closeSheet();};
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('#sheet').hidden)closeSheet();});
 
@@ -71,7 +74,7 @@ amount.oninput=()=>{amount.value=amount.value.replace(/[^0-9]/g,'').replace(/^0+
 for(let value=1;value<=5;value++){
   const button=el('button',{type:'button',textContent:'★'});
   button.setAttribute('role','radio');button.setAttribute('aria-label',`評価 ${value}`);
-  button.onclick=()=>{rating=rating===value?null:value;paintStars();};
+  button.onclick=()=>{rating=rating===value?null:value;paintStars();flow?.go('photo');};
   $('#rating').append(button);
 }
 function paintStars(){[...$('#rating').children].forEach((button,index)=>{button.classList.toggle('on',rating!==null&&index<rating);button.setAttribute('aria-checked',String(index+1===rating));});}
@@ -110,20 +113,27 @@ async function toImage(file){
 }
 $('#photo').onchange=async event=>{
   const files=[...event.target.files];event.target.value='';
-  for(const file of files){
-    try{
-      const blob=await toImage(file),url=URL.createObjectURL(blob),photo={blob,url};photos.push(photo);
-      const figure=el('figure'),remove=el('button',{type:'button',textContent:'×'});
-      remove.setAttribute('aria-label','写真を外す');
-      remove.onclick=()=>{photos=photos.filter(item=>item!==photo);URL.revokeObjectURL(url);figure.remove();};
-      figure.append(el('img',{src:url,alt:'追加した写真'}),remove);$('#previews').append(figure);
-    }catch(error){notify(`写真を読み込めません：${error.message}`);}
-  }
+  if(!files.length)return;
+  const ticket=flow.photoTicket(),run=photoGeneration;let added=0;
+  save.disabled=true;$('#photo').disabled=true;$('#photo-open').disabled=true;
+  try{
+    for(const file of files){
+      try{
+        const blob=await toImage(file);if(run!==photoGeneration)continue;
+        const url=URL.createObjectURL(blob),photo={blob,url};photos.push(photo);added++;
+        const figure=el('figure'),remove=el('button',{type:'button',textContent:'×'});remove.setAttribute('aria-label','写真を外す');
+        remove.onclick=()=>{photos=photos.filter(item=>item!==photo);URL.revokeObjectURL(url);figure.remove();};
+        figure.append(el('img',{src:url,alt:'追加した写真'}),remove);$('#previews').append(figure);
+      }catch(error){if(run===photoGeneration)notify(`写真を読み込めません：${error.message}`);}
+    }
+  }finally{save.disabled=false;$('#photo').disabled=false;$('#photo-open').disabled=false;}
+  if(added&&run===photoGeneration)flow.photoDone(ticket);
 };
 
 function paintPublish(){$('#publish-label').textContent=$('#publish').checked?'公開する':'非公開';}
 $('#publish').onchange=paintPublish;
 function reset(){
+  photoGeneration++;flow?.reset();
   $('#publish').checked=publishDefault;paintPublish();
   startedAt=new Date();paintTime();
   for(const photo of photos)URL.revokeObjectURL(photo.url);
@@ -206,13 +216,10 @@ form.onsubmit=async event=>{
   }
 };
 
-// iOSでキーボード表示中も記録ボタンを見える位置に保つ
-if(window.visualViewport){
-  const fit=()=>{document.documentElement.style.setProperty('--vh',`${visualViewport.height}px`);window.scrollTo(0,0);};
-  visualViewport.addEventListener('resize',fit);fit();
-}
 
 paintStars();
+flow=installInputFlow(form);
+void mountAutoLocation($('#auto-location-slot'));
 try{
   const data=await api('bootstrap');
   publishDefault=data.settings?.publish_default===true;

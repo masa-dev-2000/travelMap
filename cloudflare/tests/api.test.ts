@@ -564,3 +564,13 @@ test('a database failure during login ends on the 500 guidance page',async()=>{
     assert.equal(crashed.status,500);assert.equal(crashed.headers.get('Content-Type'),'text/html; charset=utf-8');assert.ok((await crashed.text()).includes('ログインできませんでした'));
   }finally{globalThis.fetch=original;}
 });
+
+// Issue #4: the new routes must stay behind the same authentication/Origin gates.
+test('location endpoints inherit worker auth and CSRF boundaries',async()=>{
+  assert.equal((await handle(request('/api/private/location-samples'),env)).status,401);
+  assert.equal((await owner('/api/private/location-capture',{command:'start'},undefined,'https://evil.test')).status,403);
+  assert.equal((await owner('/api/private/location-samples',{},undefined,'https://evil.test')).status,403);
+  const data=await (await owner('/api/private/location-samples')).json();
+  assert.ok(Array.isArray(data.samples));
+  assert.equal((await handle(request('/api/public/location-samples'),env)).status,404);
+});

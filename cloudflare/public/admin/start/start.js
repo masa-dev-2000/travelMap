@@ -1,4 +1,5 @@
 import {api,apiDelete} from '/shared.js';
+import {mountAutoLocation} from '/auto-location.js';
 const $=selector=>document.querySelector(selector);
 const button=$('#tap'),sub=$('#sub'),status=$('#status'),undo=$('#undo'),where=$('#where');
 const WAIT_FOR_FIX_MS=4000,UNDO_MS=15000;
@@ -69,7 +70,7 @@ try{
   const visible=$('#visible'),paint=()=>{$('#visible-label').textContent=visible.checked?'旅モード中':'旅モードオフ';};
   visible.checked=data.settings?.map_visible===true;paint();
   visible.onchange=async()=>{paint();try{await api('settings',{map_visible:visible.checked});}catch(error){visible.checked=!visible.checked;paint();say(error.message);}};
-  const statusForm=$('#status-form');statusForm.elements.status.value=data.user?.status||'';
-  statusForm.onsubmit=async event=>{event.preventDefault();const input=statusForm.elements.status;try{await api('settings',{status:input.value});input.blur();say(input.value.trim()?'ステータスを更新しました':'ステータスを消しました');}catch(error){say(error.message);}};
   if(!categoryId)say('カテゴリがありません。設定で追加してください');
 }catch(error){say(error.message);}
+
+void mountAutoLocation(document.querySelector('#auto-location-slot'));
