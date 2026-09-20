@@ -134,7 +134,7 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   function storyOptions(handle){
     const mine=entries.filter(e=>e.author===handle).reverse().sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);if(!mine.length)return [];
     const latest=mine.at(-1),name=latest.author_name||handle,color=`hsl(${hueOf(handle)} 70% 38%)`,face={image:latest.author_icon_url,icon:latest.author_icon,avatar:latest.author_avatar,name};
-    const steps=rows=>rows.map(e=>({date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos,lng:e.longitude,lat:e.latitude}));
+    const steps=rows=>rows.map(e=>({id:e.id,date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos,lng:e.longitude,lat:e.latitude}));
     const option=(label,rows,trip)=>({label,trip,note:`${day(rows[0].date)}〜${day(rows.at(-1).date)} · ${rows.length}件`,load:async()=>({title:trip?`${name}・${trip}`:`${name}の旅`,steps:steps(rows),face,color,shareUrl:trip===undefined?null:'/?play='+encodeURIComponent(handle)+(trip?'&trip='+encodeURIComponent(trip):'')})});
     const options=[...new Set(mine.map(e=>e.trip_name).filter(Boolean))].map(trip=>option(trip,mine.filter(e=>e.trip_name===trip),trip)),inPeriod=mine.filter(within);
     if(period!=='all'&&inPeriod.length&&inPeriod.length<mine.length)options.push(option(PERIOD_LABEL[period],inPeriod,undefined));
