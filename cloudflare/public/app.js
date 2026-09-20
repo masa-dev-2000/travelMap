@@ -5,6 +5,8 @@ import {makeOwnerRoute} from '/owner-route.js';
 import {makeEveryone} from '/panel-everyone.js';
 import {makeReplay} from '/replay.js';
 import {makeStory} from '/story.js';
+import {mountAutoLocation,navigateWithCapture} from '/auto-location.js';
+import {makeLocationMap} from '/location-map.js';
 // 1つの地図ページ。未ログインは公開データだけ、ログインすると自分の操作(じぶん・＋・設定)が増える
 const $=selector=>document.querySelector(selector),message=$('#message');
 let session={user:null};
@@ -18,7 +20,7 @@ const groups=[
   {id:'timeline',label:'タイムライン',icon:'▤',small:true,nodes:[timelineNode]},
 ];
 if(me)groups.push(
-  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){location.href='/admin/start/';return true;}return false;}},
+  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
   {id:'me',label:'じぶん',title:'じぶんの記録',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#money-panel'),$('#trip-form').closest('details'),$('#me-filters'),$('#activities').closest('section')]},
 );
 const shell=mapShell(groups);
@@ -29,15 +31,15 @@ dataWarning.append(el('strong',{textContent:'記録データを取得できま�
 const map=makeOwnerMap();
 shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの開閉で地図の幅が変わる。続く fit が新しい幅で計算されるよう、その場で合わせる
 const route=makeOwnerRoute(map,shell);
-let noticeTimer,mine=null;
+let noticeTimer,mine=null,locations=null,story=null;
 function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
-const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:!!me,onFilter:filter=>{replay.finish();mine?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle),onPlay:handle=>playPerson(handle)});
+const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:!!me,onFilter:filter=>{replay.finish();story?.finish();mine?.setFilter(filter);locations?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle),onPlay:handle=>playPerson(handle)});
 const JAPAN={center:[137.5,37.5],zoom:4.3};
 function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);if(everyone.count()&&!route.count()&&!everyone.shownCount())notify('この期間の記録はありません。期間を広げると表示されます');}
 shell.fit.onclick=()=>{shell.hide();fitRecords();};
-const replay=makeReplay(map,shell,{tracks:()=>[route.track(),...everyone.tracks()],begin:()=>{route.setReplay(true);everyone.setReplay(true);fitRecords();},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
+const replay=makeReplay(map,shell,{tracks:()=>[route.track(),...everyone.tracks()],begin:()=>{story?.finish();shell.hide();route.setReplay(true);everyone.setReplay(true);fitRecords();},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 // 旅の再生(ログ付き)。再生中は、ほかの線とマーカーを隠す
-const story=makeStory(map,shell,{begin:()=>{replay.finish();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
+story=makeStory(map,shell,{begin:()=>{replay.finish();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 // trip: undefined=選択肢を出す、''=すべての公開記録、名前=その旅(共有URL用)
 function playPerson(handle,trip){
   const options=everyone.storyOptions(handle);if(!options.length){notify('この人はいま旅モード中ではないか、公開している記録がありません');return;}
@@ -49,7 +51,9 @@ await everyone.ready;
 const dataAvailable=session.data_available!==false&&everyone.available();dataWarning.hidden=dataAvailable;replay.setAvailable(dataAvailable);
 if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいません');
 const shared=new URLSearchParams(location.search);
-if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});}
+if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});void mountAutoLocation(shell.stage);locations=makeLocationMap(route,{handle:me.handle,filter:()=>everyone.filter(),notify});void locations.refresh();}
 else if(!shared.get('play'))fitRecords();
 // 共有URL /?play=<handle>&trip=<旅名>: 公開データだけで、その再生を始める
 if(shared.get('play'))playPerson(shared.get('play'),shared.get('trip')??'');
+
+document.addEventListener('tm:auth-lost',()=>{replay.finish();story.finish();route.clear();route.setSamples([]);document.querySelector('#activities')?.replaceChildren();});

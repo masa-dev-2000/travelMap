@@ -1,5 +1,7 @@
 import {el, whoMarker, yen, ago, statusLine} from './shared.js';
 import {gl} from './owner-map.js';
+import {publicPoint} from './record-display.js';
+import {mapRecordCard} from './map-record-card.js';
 // みんなの公開記録: 旅モード中の人の一覧・タイムライン(絞り込み)・地図の線とアイコン。データは公開フィードだけ(非公開データは扱わない)
 const HUES=[24,265,330,205,95,48,0,168];
 const day=text=>new Date(text+'T00:00:00+09:00').toLocaleDateString('ja-JP',{month:'numeric',day:'numeric'});
@@ -16,7 +18,7 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   const note=el('span',{className:'friends-count'});shell.count.after(note);
   const periodSelect=el('select',{id:'period-filter'}),chip=el('select',{className:'period-chip'});chip.setAttribute('aria-label','表示する期間');note.after(chip);
   for(const node of [periodSelect,chip]){for(const [key,label] of PERIODS)node.append(new Option(node===chip?PERIOD_LABEL[key]:label,key));node.append(new Option(node===chip?'期間指定…':'日付を指定','custom'));}
-  const popup=new gl.Popup({maxWidth:'280px',offset:24});
+  const cards=mapRecordCard(map,shell),popup={remove:()=>cards.hide()};
   // タイムラインの絞り込み
   const filters=el('div',{className:'filters'}),personSelect=el('select',{id:'person-filter'}),tripSelect=el('select',{id:'public-trip-filter'}),catSelect=el('select',{id:'cat-filter'}),fromInput=el('input',{type:'date'}),toInput=el('input',{type:'date'});
   const totals=el('p',{className:'totals'}),reset=el('button',{type:'button',className:'reset',textContent:'全期間に戻す'}),legend=el('div',{className:'legend'}),list=el('div',{className:'cards',id:'entries'}),more=el('button',{type:'button',textContent:'さらに表示',hidden:true});
@@ -36,14 +38,14 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
     if(map.getSource('friends-segments'))map.getSource('friends-segments').setData(data);else map.addSource('friends-segments',{type:'geojson',data});
     if(!map.getLayer('friends-line'))map.addLayer({id:'friends-line',type:'line',source:'friends-segments',paint:{'line-color':['get','color'],'line-width':self?1.5:2.5,'line-opacity':['get','opacity']},layout:{'line-cap':'round'}},map.getLayer('travel-line')?'travel-line':undefined);
   }
+  function openEntry(entry){
+    if(!shown.some(r=>r.id===entry.id)){personSelect.value=entry.author;tripSelect.value='';catSelect.value='';setPeriod('all');apply();}
+    while(listed<shown.length&&!document.getElementById('entry-'+entry.id))renderList();
+    shell.open('timeline');document.getElementById('entry-'+entry.id)?.scrollIntoView({block:'start'});
+  }
   function detail(p){
-    const node=el('div',{className:'friend-detail'});node.append(el('strong',{textContent:p.name}));
-    const status=statusLine(p.recent.at(-1).author_status,p.recent.at(-1).author_status_at);if(status)node.append(el('p',{className:'friend-status',textContent:status}));
-    if(p.stale)node.append(el('p',{className:'hint',textContent:'この期間の記録はありません。最後の記録: '+ago(p.recent.at(-1))}));
-    for(const r of p.recent.slice(-4).reverse()){const item=el('div',{className:'friend-entry'});item.append(el('time',{textContent:[r.date,r.category_name].filter(Boolean).join('・')}),el('b',{textContent:r.place_name||'旅のひとこま'}));
-      if(r.spent_jpy!=null)item.append(el('span',{className:'spent',textContent:yen(r.spent_jpy)}));if(r.memo)item.append(el('p',{textContent:r.memo}));node.append(item);}
-    const replayButton=el('button',{type:'button',className:'friend-play',textContent:'▶ 旅を再生'});replayButton.onclick=()=>{popup.remove();onPlay?.(p.author);};node.append(replayButton);
-    const last=p.recent.at(-1);popup.setLngLat([last.longitude,last.latitude]).setDOMContent(node).addTo(map);
+    const last=p.recent.at(-1),point=publicPoint(last);if(!point)return;
+    cards.show(point,{openDetail:()=>openEntry(last),extra:{label:'▶ 旅を再生',action:()=>onPlay?.(p.author)},note:p.stale?'この期間の記録はありません。最後の公開記録を表示しています':''});
     if(p.author!==self)onOpenPerson?.(p.author);
   }
   function show(){
@@ -140,6 +142,6 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
   }
   return {ready,available:()=>!failed,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){failed=false;entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
     points:()=>on?people.flatMap(p=>(p.rows.length?p.rows:[p.last]).map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,shownCount:()=>shown.length,countText,filter:state,
-    tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>({lng:r.longitude,lat:r.latitude,t:Date.parse(r.at||r.date+'T12:00:00+09:00')})),marker:markers.get(p.author)})):[],
+    tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>{const point=publicPoint(r);return point?{...point,openDetail:()=>openEntry(r)}:null;}).filter(Boolean),marker:markers.get(p.author)})):[],
     setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
 }

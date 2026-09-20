@@ -1,0 +1,1 @@
+if(!document.querySelector('link[data-travelmap-issues]')){const link=document.createElement('link');link.rel='stylesheet';link.href='/issue-ui.css';link.dataset.travelmapIssues='';document.head.append(link);}

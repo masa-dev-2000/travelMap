@@ -1,0 +1,13 @@
+/* DOM order matches reading/keyboard order. Existing storage fields are unchanged. */
+#quick{scroll-padding-block:14px 140px;will-change:auto}
+#quick .card{flex:1 0 auto;gap:12px}
+.title-field{display:grid;gap:6px}.title-field>span,.flow-label{font-size:12px;font-weight:700;color:#647264}.title-field small{margin-left:6px;font-weight:400}.title-field .place{width:100%;height:46px;font-size:16px}
+#quick .flow-next{align-self:flex-end;min-height:36px;padding:5px 12px;border:1px solid #c9d7ce;border-radius:10px;background:#f1f6f2;color:#1f5c4a;font-size:12px}
+.rating-block,.photo-block{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.rating-block>.flow-label,.photo-block>.flow-label{flex-basis:100%}.rating-block .flow-next,.photo-block .flow-next{margin-left:auto}.photo-block .photos{min-width:0;flex:1}
+#quick .add-photo{width:68px;font-size:12px;border:0;cursor:pointer}
+#quick .memo{flex:none;display:flex;flex-direction:column;gap:6px;min-height:0}
+#quick .memo textarea{flex:none;min-height:48px;height:144px;max-height:40dvh;overflow:auto;font-size:16px;line-height:1.5}
+#quick .block{scroll-margin-block:12px}
+#quick #auto-location-slot{flex:none;margin-bottom:8px}#quick .bottom{z-index:2}
+#quick:focus-within .bottom{padding-bottom:max(8px,env(safe-area-inset-bottom))}
+@media(max-height:500px){#quick .memo textarea{height:80px}#quick .bottom #save{height:44px}.bottom-meta{min-height:28px}}

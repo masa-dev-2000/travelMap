@@ -21,7 +21,7 @@ export async function api(path,body,key=crypto.randomUUID()) {
   const result=await readResult(response);
   if (response.status===403&&result.signup){location.href=result.signup;throw new Error(result.error);}
   if (response.status===401&&result.login){location.href=result.login+'?next='+encodeURIComponent(location.pathname+location.search);throw new Error('ログインが必要です');}
-  if (!response.ok) throw new Error(result.error || '保存できませんでした');
+  if (!response.ok) { const error=new Error(result.error || '保存できませんでした');error.status=response.status;throw error; }
   return result;
 }
 export async function apiDelete(path) {

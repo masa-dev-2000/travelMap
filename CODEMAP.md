@@ -14,6 +14,7 @@
 ## Worker側の責任
 
 - `cloudflare/src/auth.ts`: Google OIDC（PKCE・state・nonce）、暗号化セッションCookie、ユーザー解決、ログアウト、認証エラー画面。本人確認はD1から分離し、D1はアプリ内ユーザー解決にだけ使う。
+- `cloudflare/src/location-api.ts`: 本人専用の自動位置ログ・記録担当の権利・一回用画面引き継ぎ。認証/Origin境界はworker.ts。公開APIに混ぜない。
 - `cloudflare/src/api.ts`: 公開・私的API、D1クエリ、R2添付、公開スナップショット、設定、サインアップを担当する。私的データは認証済み `user.id` で絞る。
 - `cloudflare/src/validation.ts`: API入力の検証と正規化。
 - `cloudflare/src/png.ts`: アイコン画像のPNG処理。
@@ -27,6 +28,14 @@
 - `cloudflare/public/owner-map.js` / `owner-route.js`: MapLibre上の本人用地点・経路・区間選択。
 - `cloudflare/public/route.js`: 公開記録の経路データ構築。
 - `cloudflare/public/replay.js`: 記録順に正規化した旅のリプレイ。
+- `cloudflare/public/input-flow.js` / `input-viewport.js`: 入力完了判定とフォーム内スクロール。iPhone実機での合格は別途確認。
+- `cloudflare/public/record-save.js`: 保存と写真変換のロック、本文/写真の固定、同じ保存キーとactivity IDでの再試行。
+- `cloudflare/public/auto-location.js`: 地図/開始/入力画面の自動位置UIと共通navigateWithCapture。リンク・記録ボタンを同じ引き継ぎへ通す。
+- `cloudflare/public/location-capture.js`: 前面表示中の5分スケジュール、OFF、復帰、転送世代、遅い応答の無効化。
+- `cloudflare/public/location-map.js`: 本人用位置の取得/フィルター/地図反映。通常記録の件数には加算しない。
+- `cloudflare/public/record-display.js`: 本人/公開/位置のみの表示契約。内部の補完時刻と表示時刻を分離。
+- `cloudflare/public/map-record-card.js`: 通常ピン/再生が共有する1枚の地点カードと写真の中断処理。
+- `cloudflare/public/replay-model.js`: 固定再生データ、時間配分、記録到達、中断区間。`story.js`は別のログ付き再生。
 - `cloudflare/public/shared.js`: DOM生成、通知など画面間の小さな共通処理。
 
 ## データと配備
@@ -38,6 +47,13 @@
 - `cloudflare/scripts/cloudflare.mjs`: プロジェクト固有のWrangler実行補助。
 - `cloudflare/scripts/prepare-assets.mjs`: npm依存から配信用アセットを準備するpredev/prebuild処理。
 
+### 自動位置のDBと索引（PR #8）
+
+- `0011-location-samples.sql`: 位置ログと記録担当のテーブル。日時検索は`location_samples_user_time(user_id,captured_at,id)`、重複/削除は位置の主キー`(user_id,id)`。
+- `0012-location-handoff.sql`: 記録担当の行に一回用引き継ぎのハッシュ/期限/移動先/消費結果を追加。既存の主キー`(user_id,client_id)`で1行へ絞るため、トークン単独索引は追加しない。
+- 0012はALTER TABLEを含むためmigration管理下で一度だけ適用。既存migrationを書き換えず、`schema-extra.sql`の新規初期化にも反映する。
+- ソースにあることと本番適用は別。PR未マージ/未配備の間は本番作成済みと扱わない。
+
 ## 検証
 
 `cloudflare/` で実行する。
@@ -47,8 +63,24 @@
 - `npm run build`: アセット準備を含むWrangler dry-run。
 - `cloudflare/tests/api.test.ts`: 認証、API、CSP、障害時挙動を含む主要な自動テスト。
 
+### PR #8の回帰試験への索引
+
+| 対象 | テスト |
+|---|---|
+| 保存競合/通信再送 | `cloudflare/tests/record-save.test.ts` |
+| 位置/一回用引き継ぎ/索引/所有者 | `cloudflare/tests/location-api.test.ts` |
+| 本物のWorkerとローカルD1経由の引き継ぎ | `cloudflare/tests/worker-handoff.test.ts` |
+| 入力/再生モデル/OFFと転送競合 | `cloudflare/tests/ux-state.test.ts` |
+| 既存DB更新と新規初期化 | `cloudflare/tests/check-location-migration.py` |
+| 10万件の合成データで索引/ページング同値性 | `cloudflare/tests/check-location-indexes.py` |
+| 独立したブラウザ操作試験 | `cloudflare/tests/browser-smoke.py`（API/GPS/描画を代替） |
+| 実MapLibre/WebGLの限定試験 | `cloudflare/tests/browser-real-map.py`（空の地図スタイル/API/GPSは合成） |
+
+CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジョブ。合格判定は対象コミットの実行結果による。iPhone・実測GPS・実地図タイルの合格を意味しない。
+
 ## 正本
 
+- Issue #2〜#7の実装・修正・配備条件: [docs/issues-2-7-implementation.md](docs/issues-2-7-implementation.md)（PR #8の作業内容。main/本番の状態とは区別）
 - 運用・開始方法: `cloudflare/README.md`
 - 設計判断: `docs/adr/`
 - 旅行SNS化の合意済み要件と計画: `docs/sns-plan.md`
