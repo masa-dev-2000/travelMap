@@ -163,6 +163,37 @@ async function settingsWrites(db: D1Database, uid: string, body: Input): Promise
 
 export async function privateApi(request: Request, env: Env, user: User): Promise<Response> {
   const url = new URL(request.url), path = url.pathname, db = env.DB, uid = user.id;
+  const orderKey=(date:string,id:string)=>date+'|'+id;
+  if (request.method === 'GET' && path === '/api/private/viewer-feed') {
+    const now=new Date().toISOString();
+    const [muteRows,cursorRows,feed]=await Promise.all([
+      query(db,'SELECT muted_user_id FROM user_mutes WHERE viewer_user_id=?',[uid]).all<{muted_user_id:string}>(),
+      query(db,'SELECT author_user_id,last_seen_order_key FROM public_read_cursors WHERE viewer_user_id=?',[uid]).all<{author_user_id:string;last_seen_order_key:string}>(),
+      query(db,`SELECT p.id,p.date,p.user_id,u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END icon_url
+        FROM public_entries p JOIN users u ON u.id=p.user_id
+        WHERE p.status='published' AND p.user_id<>? AND (p.publish_at IS NULL OR p.publish_at<=?) AND ${travelling('p.user_id')}
+        ORDER BY p.date,p.id`,[uid,now,now]).all<any>()
+    ]);
+    const muted=new Set(muteRows.results.map(r=>r.muted_user_id)), cursors=new Map(cursorRows.results.map(r=>[r.author_user_id,r.last_seen_order_key]));
+    const by=new Map<string,any>();
+    for(const row of feed.results){if(muted.has(row.user_id))continue;const key=orderKey(row.date,row.id),item=by.get(row.user_id)||{handle:row.handle,display_name:row.display_name,icon:row.icon,avatar_url:row.avatar_url,icon_url:row.icon_url,has_unread:false,first_unread:null,latest:null};item.latest=row;const cursor=cursors.get(row.user_id);if(!cursor||key>cursor){item.has_unread=true;item.first_unread??=key;}by.set(row.user_id,item);}
+    return json({users:[...by.values()],muted:[...muted]});
+  }
+  if (request.method === 'GET' && path === '/api/private/mutes') {
+    const rows=await query(db,'SELECT u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN m.muted_user_id IS NULL THEN 0 ELSE 1 END muted FROM users u LEFT JOIN user_mutes m ON m.muted_user_id=u.id AND m.viewer_user_id=? WHERE u.id<>? AND u.terms_accepted_at IS NOT NULL ORDER BY u.display_name,u.handle',[uid,uid]).all();return json({users:rows.results});
+  }
+  if (request.method === 'POST' && path === '/api/private/mutes') {
+    const body=await readInput(request),handle=text(body.handle,'ユーザー',40),muted=body.muted;if(typeof muted!=='boolean')throw new InputError('ミュート設定を確認してください');
+    const target=await query(db,'SELECT id FROM users WHERE handle=? AND id<>?',[handle,uid]).first<{id:string}>();if(!target)return json({error:'ユーザーが見つかりません'},404);
+    if(muted)await query(db,'INSERT OR IGNORE INTO user_mutes(viewer_user_id,muted_user_id,created_at) VALUES(?,?,?)',[uid,target.id,new Date().toISOString()]).run();else await query(db,'DELETE FROM user_mutes WHERE viewer_user_id=? AND muted_user_id=?',[uid,target.id]).run();return json({handle,muted});
+  }
+  if (request.method === 'POST' && path === '/api/private/read-cursor') {
+    const body=await readInput(request),entryId=text(body.entry_id,'記録',100);
+    const row=await query(db,`SELECT p.id,p.date,p.user_id FROM public_entries p WHERE p.id=? AND p.status='published' AND p.user_id<>?`,[entryId,uid]).first<any>();if(!row)return json({error:'記録が見つかりません'},404);
+    const key=orderKey(row.date,row.id),previous=await query(db,'SELECT last_seen_order_key FROM public_read_cursors WHERE viewer_user_id=? AND author_user_id=?',[uid,row.user_id]).first<{last_seen_order_key:string}>();
+    if(!previous||key>previous.last_seen_order_key)await query(db,`INSERT INTO public_read_cursors(viewer_user_id,author_user_id,last_seen_entry_id,last_seen_order_key,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(viewer_user_id,author_user_id) DO UPDATE SET last_seen_entry_id=excluded.last_seen_entry_id,last_seen_order_key=excluded.last_seen_order_key,updated_at=excluded.updated_at`,[uid,row.user_id,row.id,key,new Date().toISOString()]).run();
+    return json({saved:true,order_key:key});
+  }
   if (request.method === 'GET') {
     if (path === '/api/private/me') return json({user});
     if (path === '/api/private/bootstrap') {
