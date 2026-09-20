@@ -1,4 +1,4 @@
-import {el} from '/shared.js';
+import {el,api as apiPrivate} from '/shared.js';
 import {mapShell} from '/map-shell.js';
 import {makeOwnerMap} from '/owner-map.js';
 import {makeOwnerRoute} from '/owner-route.js';
@@ -7,6 +7,9 @@ import {makeReplay} from '/replay.js';
 import {makeStory} from '/story.js';
 import {mountAutoLocation,navigateWithCapture} from '/auto-location.js';
 import {makeLocationMap} from '/location-map.js';
+import {makeViewerState} from '/viewer-state.js';
+import {makeStoriesStrip} from '/stories-strip.js';
+import {makePlaybackController} from '/playback-controller.js';
 // 1つの地図ページ。未ログインは公開データだけ、ログインすると自分の操作(じぶん・＋・設定)が増える
 const $=selector=>document.querySelector(selector),message=$('#message');
 let session={user:null};
@@ -15,13 +18,11 @@ if(session.needs_signup)location.replace('/signup/');// 同意前のアカウン
 const me=session.user;
 for(const dialog of document.querySelectorAll('dialog'))document.body.append(dialog);
 const peopleNode=el('div',{className:'people'}),timelineNode=el('div');
-const groups=[
-  {id:'everyone',label:'みんな',title:'いま旅に出ている人',icon:'☺',nodes:[peopleNode]},
-  {id:'timeline',label:'タイムライン',icon:'▤',small:true,nodes:[timelineNode]},
-];
+const groups=[];
 if(me)groups.push(
+  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#me-filters'),$('#activities').closest('section')]},
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
-  {id:'me',label:'じぶん',title:'じぶんの記録',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#money-panel'),$('#trip-form').closest('details'),$('#me-filters'),$('#activities').closest('section')]},
+  {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[$('#money-panel'),$('#trip-form').closest('details')],action:()=>{$('#settings-dialog').showModal();return true;}}
 );
 const shell=mapShell(groups);
 if(!me&&!session.authenticated){const login=el('a',{className:'rail-login',href:'/auth/google?next=%2F'});login.title='Googleアカウントで登録できます';login.append(el('span',{className:'rail-icon',textContent:'→'}),el('span',{textContent:'はじめる'}),el('span',{textContent:'/ ログイン'}),el('span',{className:'rail-note',textContent:'Googleアカウントで登録できます'}));shell.fit.after(login);}
@@ -33,7 +34,8 @@ shell.drawer.addEventListener('viewchange',()=>map.resize());// 右ペインの�
 const route=makeOwnerRoute(map,shell);
 let noticeTimer,mine=null,locations=null,story=null;
 function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
-const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:!!me,onFilter:filter=>{replay.finish();story?.finish();mine?.setFilter(filter);locations?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle),onPlay:handle=>playPerson(handle)});
+const viewerState=makeViewerState();
+const everyone=makeEveryone(map,shell,{peopleNode,timelineNode,showToggle:false,onFilter:filter=>{replay.finish();story?.finish();mine?.setFilter(filter);locations?.setFilter(filter);fitRecords();},onOpenPerson:handle=>mine?.visited?.(handle),onPlay:handle=>playPerson(handle)});
 const JAPAN={center:[137.5,37.5],zoom:4.3};
 function fitRecords(){const points=[...route.points(),...everyone.points()];if(points.length)route.fitPoints(points);else map.jumpTo(JAPAN);if(everyone.count()&&!route.count()&&!everyone.shownCount())notify('この期間の記録はありません。期間を広げると表示されます');}
 shell.fit.onclick=()=>{shell.hide();fitRecords();};
@@ -46,10 +48,12 @@ function playPerson(handle,trip){
   if(handle!==me?.handle)mine?.visited?.(handle);
   const chosen=trip===undefined?options:options.filter(option=>option.trip===trip);story.open('旅を再生',chosen.length?chosen:options.slice(-1));
 }
-window.__tm={everyone,route,shell,replay,story};// 画面確認用(コンソールから状態を読む)
+window.__tm={everyone,route,shell,replay,story,viewerState};// 画面確認用(コンソールから状態を読む)
+const stories=me?makeStoriesStrip(shell.stage,{state:viewerState,onSelect:handle=>{viewerState.select(handle);everyone.selectPerson?.(handle);stories.render(everyone.viewerUsers?.()||[]);}}):null;
+async function refreshViewer(){if(!me)return;try{const data=await apiPrivate('viewer-feed');viewerState.setMuted(data.muted||[]);viewerState.setUnread(data.users||[]);stories.render((data.users||[]).map(u=>({...u,self:me.handle})));}catch{}}
 await everyone.ready;
 const dataAvailable=session.data_available!==false&&everyone.available();dataWarning.hidden=dataAvailable;replay.setAvailable(dataAvailable);
-if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいません');
+if(dataAvailable&&!everyone.count())notify('いま旅に出ている人はいません');void refreshViewer();
 const shared=new URLSearchParams(location.search);
 if(me){const {startMe}=await import('/panel-me.js');mine=await startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip:(title,options)=>story.open(title,options)});void mountAutoLocation(shell.stage);locations=makeLocationMap(route,{handle:me.handle,filter:()=>everyone.filter(),notify});void locations.refresh();}
 else if(!shared.get('play'))fitRecords();
