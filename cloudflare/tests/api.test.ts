@@ -574,3 +574,10 @@ test('location endpoints inherit worker auth and CSRF boundaries',async()=>{
   assert.ok(Array.isArray(data.samples));
   assert.equal((await handle(request('/api/public/location-samples'),env)).status,404);
 });
+
+test('viewer social endpoints stay private and validate mute targets',async()=>{
+  assert.equal((await handle(request('/api/private/viewer-feed'),env)).status,401);
+  assert.equal((await handle(request('/api/private/mutes'),env)).status,401);
+  assert.equal((await handle(request('/api/private/read-cursor'),env)).status,401);
+  assert.equal((await owner('/api/private/mutes',{handle:'missing-user',muted:true})).status,404);
+});
