@@ -141,6 +141,9 @@ export function makeEveryone(map,shell,{peopleNode,timelineNode,showToggle,onFil
     options.push(option('すべての公開記録',mine,''));return options;
   }
   return {ready,available:()=>!failed,storyOptions,setSelf:handle=>{self=handle;if(loaded){group();renderPeople();}},reload:async()=>{try{const response=await fetch('/api/public/entries');if(response.ok){failed=false;entries=(await response.json()).entries||[];const keep=state();setup();if(keep.period==='custom'){setPeriod('custom');fromInput.value=keep.from;toInput.value=keep.to;}personSelect.value=keep.person;if(personSelect.value!==keep.person)personSelect.value='';apply(false);renderPeople();}}catch{}},
+    selectPerson:handle=>{personSelect.value=handle||'';apply();},
+    viewerUsers:()=>everyone.map(author=>{const row=entries.find(e=>e.author===author);return row?{handle:author,display_name:row.author_name||author,icon:row.author_icon,avatar_url:row.author_avatar,icon_url:row.author_icon_url}:null;}).filter(Boolean),
+    entriesFor:(handle,onlyUnread=false)=>shown.filter(e=>e.author===handle),
     points:()=>on?people.flatMap(p=>(p.rows.length?p.rows:[p.last]).map(r=>[r.longitude,r.latitude])):[],count:()=>everyone.length,shownCount:()=>shown.length,countText,filter:state,
     tracks:()=>on?people.filter(p=>p.rows.length).map(p=>({id:p.author,color:`hsl(${p.hue} 70% 40%)`,points:p.rows.map(r=>{const point=publicPoint(r);return point?{...point,openDetail:()=>openEntry(r)}:null;}).filter(Boolean),marker:markers.get(p.author)})):[],
     setReplay:value=>{override=value?{type:'FeatureCollection',features:[]}:null;popup.remove();if(value)draw();else show();},marker:author=>markers.get(author)};
