@@ -2,7 +2,7 @@
 
 ## 状態と目次
 
-初期実装: `2256782143bda1d56a8819c15a645c2c112afd22`。PR #8 はレビュー修正後、2026-09-20に `main` へマージ済み（merge commit `b6ad5ac574545a79211018cf041680a9afbd1f04`）。本番配備・本番DB変更はまだ別工程として未完了。
+初期実装: `2256782143bda1d56a8819c15a645c2c112afd22`。PR #8 はレビュー修正後、2026-09-20に `main` へマージ済み（merge commit `b6ad5ac574545a79211018cf041680a9afbd1f04`）。同日、本番D1の0011/0012とWorkerの配備を完了。iPhone実機・実GPSは未確認。
 
 [要望対応](#要望対応) / [レビュー修正](#レビュー修正) / [検証](#検証) / [dbと索引](#dbと索引) / [配備条件](#配備条件)
 
@@ -66,13 +66,13 @@ CIのcore/browserは独立ジョブで、一方の失敗で他方の試験を飛
 | 重複照合/1地点削除 | location_samplesの主キー(user_id,id) |
 | lease更新/prepare/claim | location_capture_leasesの主キー(user_id,client_id) |
 
-0011は位置/leaseテーブルと位置の日時索引を追加。0012はleaseにhandoff_hash/destination/expires_at/claimed_at/next_atを追加。1行へ絞って照合するためトークン単独索引は不要。schema-extra.sqlにも同じ定義を反映した。コード索引は[CODEMAP](../CODEMAP.md)からたどれる。
+0011は位置/leaseテーブルと位置の日時索引を追加。0012はleaseにhandoff_hash/destination/expires_at/claimed_at/next_atを追加。1行へ絞って照合するためトークン単独索引は不要。schema-extra.sqlにも同じ定義を反映した。コード索引は[CODEMAP](../CODEMAP.md)からたどれる。本番では2026-09-20に両SQLファイルを順番に直接実行し、列・索引・外部キーを確認した。
 
 ## 配備条件
 
 最終headのCIは合格し、mainへのマージは完了した。公開前にはiPhoneの日本語/数字キーボード・カーソル・写真キャンセル/復帰・ロック復帰・アカウント切替を確認する。iPhone実機と実GPSは未確認。
 
-配備時は対象D1、既適用migration、バックアップ/復旧方法を別途確認し、未適用の0011→0012→コードの順。0012はALTER TABLEのためmigration台帳で一度だけ適用し、累積schemaへ全migrationを重ねて二重適用しない。本番の索引存在はソースだけで確認済みと扱わない。
+配備時は対象D1、既適用migration、バックアップ/復旧方法を別途確認し、未適用の0011→0012→コードの順。本番D1は初期投入由来の既存スキーマを持つ一方、`d1_migrations`台帳は空でWranglerが0001以降も未適用と表示した。このため`migrations apply`は使用せず、0011/0012のSQLファイルを直接一度ずつ実行した。台帳は空のままなので、今後も一覧だけを根拠に再適用しない。
 
 戻す場合は旧コードまたは機能停止へ戻し、位置データや追加列を削除しない。実装済み/CI合格/実機合格/本番反映は別の状態として管理する。
 
@@ -81,6 +81,6 @@ CIのcore/browserは独立ジョブで、一方の失敗で他方の試験を飛
 
 - 実装: mainへ反映済み。
 - CI: 最終headで合格済み。
-- 本番: **未反映**。本番D1 migrationとWorker deployを実施済みとは記録しない。
+- 本番: **反映済み**。D1 0011/0012の直接実行、DB構造と索引の確認、Worker Version `be322ae7-5354-41d3-82c9-91b672d513d1` の100%配備、公開API/未認証私的APIのスモーク確認を実施。
 - Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。本番用 `wrangler.production.jsonc` は運用上Git管理外であり、リポジトリには実Account ID/D1 IDを保存しない。
 - 本番作業を再開する際は、Cloudflare認証済み環境で本番設定の存在と Worker=`travelmap` / D1=`travelmap` / R2=`travelmap-files` を照合し、バックアップ後に未適用migration→コードの順で反映する。

@@ -51,7 +51,7 @@
 
 - `0011-location-samples.sql`: 位置ログと記録担当のテーブル。日時検索は`location_samples_user_time(user_id,captured_at,id)`、重複/削除は位置の主キー`(user_id,id)`。
 - `0012-location-handoff.sql`: 記録担当の行に一回用引き継ぎのハッシュ/期限/移動先/消費結果を追加。既存の主キー`(user_id,client_id)`で1行へ絞るため、トークン単独索引は追加しない。
-- 0012はALTER TABLEを含むためmigration管理下で一度だけ適用。既存migrationを書き換えず、`schema-extra.sql`の新規初期化にも反映する。
+- 0012はALTER TABLEを含むため一度だけ適用。既存migrationを書き換えず、`schema-extra.sql`の新規初期化にも反映する。
 - ソースにあることと本番適用は別。PR未マージ/未配備の間は本番作成済みと扱わない。
 
 ## 検証
@@ -82,7 +82,8 @@ CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジ
 
 - Issues #2〜#7 は PR #8 で main にマージ済み。merge commit: `b6ad5ac574545a79211018cf041680a9afbd1f04`。
 - マージ直前 head `27c28a6817ff1b6a6f50cdc85a6a03d3f599bccf` の CI run `35509777387` は core/browser と実MapLibre/WebGL限定試験が成功。
-- ただし上記は本番配備を意味しない。本番D1の0011/0012適用、本番Workerデプロイ、iPhone実機/実GPS確認は別状態として管理する。
+- 本番D1へ0011/0012を順番に適用し、Worker Version `be322ae7-5354-41d3-82c9-91b672d513d1` を100%配備済み。公開APIと未認証の私的APIをスモーク確認済み。iPhone実機/実GPSは未確認。
+- 本番D1は初期投入由来の既存スキーマを持つが、`d1_migrations`台帳は空。0011/0012はSQLファイルを直接実行した。Wranglerの`migrations apply`は既存の0001以降も未適用と表示するため、そのまま実行しない。
 - Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。実本番IDを含む `wrangler.production.jsonc` はGit管理外のため、本番作業前に実行環境で存在・対象アカウント/D1/R2を照合する。
 
 ## 正本

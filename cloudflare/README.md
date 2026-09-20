@@ -5,8 +5,16 @@ Google OIDCで認証し、7日間の認証付き暗号化Cookieでログイン�
 D1由来の記録・プロフィールだけを一時停止として表示する。私的APIは503 `data_unavailable` を返す。
 
 地図は1画面構成。SP下部ナビは「みんな／タイムライン／記録／じぶん」で、期間・件数を上部、全体表示と地図種類を
-地図上の補助操作として表示する。2026-09-18時点の本番Versionは `f9c82219-6386-4866-ad1d-665ce51959c1`、
-対応commitは `24a167f`。
+地図上の補助操作として表示する。2026-09-20時点の本番Versionは `be322ae7-5354-41d3-82c9-91b672d513d1`、
+配備元コードはPR #8を含む `b6ad5ac`（後続は文書更新のみ）。
+
+## Issues #2〜#7 の本番反映（2026-09-20）
+
+- 本番D1 `travelmap`をSQLエクスポートでバックアップし、復元可能なことを確認。保存先はGit管理外の`github-account-migration/data-backups/travelMap-production-2026-09-20-pre-0011-0012.sql`。
+- 既存テーブルはあるが`d1_migrations`台帳は空。Wranglerの`migrations apply`は使用せず、`0011-location-samples.sql`、`0012-location-handoff.sql`を順番に`d1 execute --remote --file`で直接一度ずつ実行した。今後も台帳の一覧だけを根拠に再適用しない。
+- `location_samples_user_time(user_id,captured_at,id)`、引き継ぎ用5列、外部キー違反なしを本番D1で確認。既存users 4件、activities 353件を維持。
+- 本番Workerは上記Versionを100%配備。公開画面・公開API・追加JS資産は200、未認証`/api/private/me`は401。本人ログイン、iPhone実機、実GPS、画面ロック/復帰、キーボード、カメラ撮影/復帰は未確認。
+- Workerの復旧は旧Version `f9c82219-6386-4866-ad1d-665ce51959c1`へ戻す。DBは追加テーブル/列を削除せず、新しい書き込みを確認してからバックアップとの整合を取る。
 
 ## 正本への入口
 
