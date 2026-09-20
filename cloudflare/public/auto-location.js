@@ -3,6 +3,14 @@ import {el} from './shared.js';
 import {createLocationCapture} from './location-capture.js';
 const HANDOFF='travelmap.location.handoff',CLIENT='travelmap.location.client';
 const paths=new Set(['/','/index.html','/admin/start/','/admin/record/']);
+let navigationHandler=null;
+export function navigateWithCapture(href){
+  const url=new URL(href,location.href);
+  if(url.origin!==location.origin||!paths.has(url.pathname))throw new Error('移動先が不正です');
+  if(navigationHandler)return navigationHandler(url);
+  location.assign(url.href);return Promise.resolve();
+}
+const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
 export async function locationRequest(path,body,method=body===undefined?'GET':'POST',keepalive=false){
   const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),15000);
   try{
@@ -32,21 +40,37 @@ export async function mountAutoLocation(slot){
   });
   toggle.onclick=()=>{if(control.state().enabled){control.stop();try{sessionStorage.removeItem(HANDOFF);}catch{}}else{void control.start();if(navigator.wakeLock)navigator.wakeLock.request('screen').then(lock=>{if(control.state().enabled)wake=lock;else void lock.release();}).catch(()=>{});}};
   if(channel)channel.onmessage=event=>{if(event.data?.type==='changed')document.dispatchEvent(new Event('tm:location-change'));};
-  // Handoff is single-use and only written for an intentional same-tab internal link.
+  // Same-tab navigation is explicit. Referrer stays suppressed by the Worker.
+  let navigating=false;
+  navigationHandler=async url=>{
+    if(navigating)return;navigating=true;
+    try{
+      if(control.state().enabled){
+        const transfer=await control.prepareHandoff(url.pathname,randomToken());
+        if(transfer&&control.state().enabled){
+          try{sessionStorage.setItem(HANDOFF,JSON.stringify({...transfer,handle:session.user.handle}));}
+          catch{control.stop('引き継ぎを保存できないため停止しました');}
+        }else{control.stop('画面移動のため停止しました。スイッチで再開してください');try{sessionStorage.removeItem(HANDOFF);}catch{}}
+      }
+    }finally{location.assign(url.href);}
+  };
   let transfer=null;try{transfer=JSON.parse(sessionStorage.getItem(HANDOFF)||'null');sessionStorage.removeItem(HANDOFF);}catch{}
-  let referring=false;try{referring=new URL(document.referrer).origin===location.origin;}catch{}
   const navigation=performance.getEntriesByType('navigation')[0];
-  if(clientId&&transfer&&transfer.handle===session.user.handle&&transfer.destination===location.pathname&&Date.now()-transfer.at<15000&&referring&&navigation?.type==='navigate'&&!window.opener)void control.start(transfer);
+  if(clientId&&transfer&&transfer.handle===session.user.handle&&transfer.destination===location.pathname&&navigation?.type==='navigate'&&!window.opener){
+    // The server checks token expiry/owner/destination and atomically consumes it.
+    void control.start(transfer);
+  }
   document.addEventListener('click',event=>{
     if(!event.isTrusted||event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
     const link=event.target.closest?.('a[href]');if(!link||link.hasAttribute('download')||(link.target&&link.target!=='_self'))return;
-    const url=new URL(link.href,location.href),state=control.handoff();
-    if(state&&url.origin===location.origin&&paths.has(url.pathname)&&url.pathname!==location.pathname)try{sessionStorage.setItem(HANDOFF,JSON.stringify({...state,handle:session.user.handle,destination:url.pathname}));}catch{}
+    const url=new URL(link.href,location.href);
+    if(control.state().enabled&&url.origin===location.origin&&paths.has(url.pathname)&&url.pathname!==location.pathname){event.preventDefault();void navigateWithCapture(url.href);}
   });
   document.addEventListener('visibilitychange',()=>control.setVisible(!document.hidden));
   window.addEventListener('pagehide',()=>control.setVisible(false));
   window.addEventListener('pageshow',event=>{if(event.persisted){control.stop('オフ・再開するにはスイッチを押してください');try{sessionStorage.removeItem(HANDOFF);}catch{}}});
   document.addEventListener('tm:auth-lost',()=>{control.stop('ログイン状態が変わったため停止しました');toggle.disabled=true;log.disabled=true;for(const dialog of document.querySelectorAll('.auto-location-dialog'))dialog.close();try{sessionStorage.removeItem(HANDOFF);}catch{}});
+  document.addEventListener('click',event=>{if(event.target.closest?.('#logout'))document.dispatchEvent(new Event('tm:auth-lost'));},{capture:true});
   document.addEventListener('submit',event=>{if(event.target.action&&new URL(event.target.action).pathname==='/auth/logout'){control.stop();try{sessionStorage.removeItem(HANDOFF);}catch{}}},{capture:true});
   log.onclick=()=>openLocationLog(notify);
   return {root,control};

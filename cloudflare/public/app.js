@@ -5,7 +5,7 @@ import {makeOwnerRoute} from '/owner-route.js';
 import {makeEveryone} from '/panel-everyone.js';
 import {makeReplay} from '/replay.js';
 import {makeStory} from '/story.js';
-import {mountAutoLocation} from '/auto-location.js';
+import {mountAutoLocation,navigateWithCapture} from '/auto-location.js';
 import {makeLocationMap} from '/location-map.js';
 // 1つの地図ページ。未ログインは公開データだけ、ログインすると自分の操作(じぶん・＋・設定)が増える
 const $=selector=>document.querySelector(selector),message=$('#message');
@@ -20,7 +20,7 @@ const groups=[
   {id:'timeline',label:'タイムライン',icon:'▤',small:true,nodes:[timelineNode]},
 ];
 if(me)groups.push(
-  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){location.href='/admin/start/';return true;}return false;}},
+  {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:[el('a',{className:'quick-record',href:'/admin/start/',textContent:'スマホ用の記録をはじめる →'}),$('#add-forms')],action:()=>{if(innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
   {id:'me',label:'じぶん',title:'じぶんの記録',icon:'◉',nodes:[el('div',{id:'footprints'}),$('#money-panel'),$('#trip-form').closest('details'),$('#me-filters'),$('#activities').closest('section')]},
 );
 const shell=mapShell(groups);

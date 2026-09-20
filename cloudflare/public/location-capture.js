@@ -3,15 +3,15 @@ export const CAPTURE_INTERVAL_MS=300000,HEARTBEAT_MS=30000;
 // Dependency injection makes time, permissions, pending network writes and tab races testable.
 export function createLocationCapture({clientId,pageId,lease,getPosition,save,makeId=()=>crypto.randomUUID(),now=()=>Date.now(),setTimer=setTimeout,clearTimer=clearTimeout,onState=()=>{},onSaved=()=>{}}){
   let enabled=false,visible=true,generation=0,captureId=null,segmentId=null,owner=null,nextAt=0,lastSavedAt=null;
-  let timer=null,heartbeat=null,retry=null,sending=0,phase='off',message='オフ';
+  let timer=null,heartbeat=null,retry=null,sending=0,phase='off',message='オフ',transferring=false;
   const credentials=()=>({client_id:clientId,capture_id:captureId,page_id:pageId});
-  const state=()=>({enabled,visible,phase,message,nextAt,lastSavedAt,sending,owner});
+  const state=()=>({enabled,visible,phase,message,nextAt,lastSavedAt,sending,owner,transferring});
   const emit=(status,text)=>{phase=status;message=text;onState(state());};
-  const valid=run=>enabled&&visible&&generation===run;
+  const valid=run=>enabled&&visible&&!transferring&&generation===run;
   function clear(){if(timer!==null)clearTimer(timer);if(heartbeat!==null)clearTimer(heartbeat);timer=heartbeat=null;if(retry){clearTimer(retry.timer);retry.resolve(false);retry=null;}}
   function release(creds){return lease({...creds,command:'stop'}).catch(()=>{});}
   function stop(reason='オフ'){
-    const creds=captureId?credentials():null;enabled=false;generation++;clear();
+    const creds=captureId?credentials():null;enabled=false;transferring=false;generation++;clear();
     emit('off',sending?'停止済み・直前の送信を確認中':reason);
     if(creds)void release(creds);
   }
@@ -53,23 +53,43 @@ export function createLocationCapture({clientId,pageId,lease,getPosition,save,ma
   }
   async function start(handoff=null){
     if(enabled&&visible)return;
-    clear();enabled=true;visible=true;const run=++generation;
-    captureId=handoff?.captureId||makeId();segmentId=makeId();nextAt=handoff?.nextAt||now();owner=handoff?.owner||null;lastSavedAt=handoff?.lastSavedAt||null;
+    clear();enabled=true;visible=true;transferring=false;const run=++generation;
+    captureId=makeId();segmentId=makeId();nextAt=handoff?.nextAt??now();owner=handoff?.owner??null;lastSavedAt=handoff?.lastSavedAt??null;
     emit('starting','準備中…');
+    const claiming=credentials();
+    const request=handoff?.token?{...claiming,command:'claim',token:handoff.token,destination:handoff.destination}:{...claiming,command:'start',previous_capture_id:handoff?.previousCaptureId??captureId};
     try{
-      const claiming=credentials();
-      const response=await lease({...claiming,command:'start',previous_page_id:handoff?.pageId||pageId,previous_capture_id:handoff?.previousCaptureId||captureId});
-      if(!valid(run)){if(!enabled||!visible||captureId!==claiming.capture_id)void release(claiming);return;}
+      let response;
+      // Repeat only the SAME claim, never fall back to start after a failed claim.
+      for(let attempt=0;attempt<2;attempt++){
+        try{response=await lease(request);break;}
+        catch(error){if(!handoff?.token||attempt||!valid(run)||[400,401,403,409].includes(error.status))throw error;}
+      }
+      if(!valid(run)){void release(claiming);return;}
       if(owner&&owner!==response.owner){stop('利用者が変わったため停止しました');return;}
-      owner=response.owner;beat(run);
+      owner=response.owner;if(handoff?.token)nextAt=response.next_at;
+      if(!Number.isFinite(nextAt)){stop('引き継ぎ予定を確認できないため停止しました');return;}
+      beat(run);
       if(nextAt<=now())await sample(run);else{emit('recording','記録中 · 次回の取得を待っています');schedule(run);}
-    }catch(error){if(valid(run))stop(error.message||'自動位置記録を開始できませんでした');}
+    }catch(error){if(valid(run))stop(error.message||'自動位置記録を開始できませんでした');else void release(claiming);}
+  }
+  async function prepareHandoff(destination,token){
+    if(!enabled||!visible||transferring||!owner)return null;
+    transferring=true;const run=++generation,creds=credentials();clear();emit('transferring','画面を移動する準備中…');
+    try{
+      const result=await lease({...creds,command:'prepare',destination,token,next_at:nextAt});
+      if(!enabled||!visible||run!==generation){void release(creds);return null;}
+      if(result.owner!==owner){stop('利用者が変わったため停止しました');return null;}
+      emit('transferring','自動記録を引き継いで移動します');
+      return {token,owner,destination,expiresAt:result.expires_at,nextAt:result.next_at,lastSavedAt};
+    }catch(error){if(run===generation)stop(error.message||'引き継ぎに失敗したため停止しました');return null;}
   }
   function setVisible(next){
     if(next===visible)return;
+    if(transferring){visible=next;return;}
     if(!next){visible=false;generation++;clear();if(enabled){emit('paused','画面が非表示のため一時停止');void release(credentials());}return;}
-    visible=true;if(enabled){const handoff={captureId:makeId(),previousCaptureId:captureId,pageId,owner,nextAt,lastSavedAt};enabled=false;void start(handoff);}
+    visible=true;if(enabled){const handoff={previousCaptureId:captureId,owner,nextAt,lastSavedAt};enabled=false;void start(handoff);}
   }
   function handoff(){return enabled?{captureId,pageId,owner,nextAt,lastSavedAt,at:now()}:null;}
-  return {start,stop,setVisible,state,handoff,dispose:()=>stop()};
+  return {start,stop,setVisible,state,handoff,prepareHandoff,dispose:()=>stop()};
 }
