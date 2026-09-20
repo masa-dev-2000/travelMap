@@ -118,3 +118,33 @@ Current test matrix: 83 Node cases, 18 standard-browser cases plus four lifecycl
 and seven real-MapLibre cases plus four lifecycle cases. These are configured case counts;
 final successful execution, checked-out revision and artifact IDs must be recorded on
 PR #14. A previous run's success is not evidence that a later commit passed.
+
+## Production release (2026-09-21)
+
+Merged as `6f8c4b09ed8cf14da3b773ddf813a71d8582d8cf` from verified head `4bafc50`
+(CI run 35518255675, core + browser success). The merge tree is byte-identical to the
+verified head, so no re-verification was required. Local re-run before merging: tsc,
+83 Node cases, build, 0011..0015 migration integration, index/paging regression,
+18 standard-browser cases, 7 real-MapLibre cases and 4+4 lifecycle cases, plus a
+production-config dry-run confirming D1 `travelmap`, R2 `travelmap-files` and vars.
+
+Production D1 was exported to a Git-external backup and restored into an isolated
+SQLite database (counts matched, `integrity_check` ok, zero FK violations) before any
+change. The live structure was read first: `user_mutes`, `public_read_cursors` and
+`public_entry_sequence` were absent, so 0013 → 0014 → 0015 were each executed once via
+`d1 execute --remote --file`. The `d1_migrations` ledger is still empty and was not used
+as evidence. After the migration, columns, indexes and foreign keys verified, the legacy
+cursor table retained, and users 4 / activities 353 / transactions 267 /
+public_entries 353 / 396,095 JPY unchanged.
+
+Worker Version `d43a7e3b-cb07-408f-905e-d8f1cbbf8512` is deployed at 100% from that
+merge commit; existing secrets were not recreated. Against production, the owner's
+authenticated session returned 200 from `/api/private/viewer-feed` and
+`/api/private/mutes`, with `publication_seq` 299–351 and `unread` present, and
+`public_entry_sequence` seeded 353 rows on first observation — so 0015 works on live
+data. Unauthenticated private endpoints return 401 and the public feed exposes no mute,
+read or internal-ID fields.
+
+Not verified in production: playback itself, because running it would update the
+owner's real read cursors; mute toggling, for the same reason; iPhone hardware and
+live GPS. Those remain covered only by the automated cases above.

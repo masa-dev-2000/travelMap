@@ -78,11 +78,20 @@
 
 CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジョブ。合格判定は対象コミットの実行結果による。iPhone・実測GPS・実地図タイルの合格を意味しない。
 
-## 現在の公開状態（2026-09-20）
+## 現在の公開状態（2026-09-21）
+
+- Issues #9〜#13 は PR #14 で main にマージ済み。merge commit: `6f8c4b09ed8cf14da3b773ddf813a71d8582d8cf`。マージ直前 head `4bafc50ff1671644e2c66411a670ce34fa78b4f3` の CI run `35518255675` が core/browser とも成功。マージ結果のツリーは検証済み head と同一。
+- 本番D1へ0013→0014→0015を順番に一度ずつ適用し、Worker Version `d43a7e3b-cb07-408f-905e-d8f1cbbf8512` を100%配備済み。障害時の復旧先は旧Version `be322ae7-5354-41d3-82c9-91b672d513d1`。
+- `public_entry_sequence` は個人用feedの初回観測で353件（seq 1〜353・著者4人）を採番済み。外部キー違反0、既存データ（users 4・activities 353・transactions 267・public_entries 353・支出合計396,095円）を維持。
+- 本人の認証済みセッションで `/api/private/viewer-feed`・`/api/private/mutes` が200を返し、`publication_seq` と `unread` が機能することを本番で確認。公開フィードにミュート・既読・内部IDは含まれない。
+- 本番画面で旧常設UI（＋/−ズーム・みんな・全ルート・地図種類）が0件、ナビが「プロフィール／記録／設定」、右上が自動記録ON/OFF、地図種類とミュートが設定内にあることを確認。
+- 再生動作そのものは本番で未実施（実行すると本人の既読カーソルを更新するため）。回帰はNodeテストとブラウザ試験で担保。iPhone実機/実GPSも未確認。
+
+### 旧記録（Issues #2〜#7、2026-09-20）
 
 - Issues #2〜#7 は PR #8 で main にマージ済み。merge commit: `b6ad5ac574545a79211018cf041680a9afbd1f04`。
 - マージ直前 head `27c28a6817ff1b6a6f50cdc85a6a03d3f599bccf` の CI run `35509777387` は core/browser と実MapLibre/WebGL限定試験が成功。
-- 本番D1へ0011/0012を順番に適用し、Worker Version `be322ae7-5354-41d3-82c9-91b672d513d1` を100%配備済み。公開APIと未認証の私的APIをスモーク確認済み。iPhone実機/実GPSは未確認。
+- 本番D1へ0011/0012を順番に適用し、Worker Version `be322ae7-5354-41d3-82c9-91b672d513d1` を100%配備した。
 - 本番D1は初期投入由来の既存スキーマを持つが、`d1_migrations`台帳は空。0011/0012はSQLファイルを直接実行した。Wranglerの`migrations apply`は既存の0001以降も未適用と表示するため、そのまま実行しない。
 - Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。実本番IDを含む `wrangler.production.jsonc` はGit管理外のため、本番作業前に実行環境で存在・対象アカウント/D1/R2を照合する。
 

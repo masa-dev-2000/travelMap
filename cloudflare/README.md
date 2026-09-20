@@ -4,9 +4,20 @@
 Google OIDCで認証し、7日間の認証付き暗号化Cookieでログイン状態を保持する。D1障害時も認証と地図画面は利用でき、
 D1由来の記録・プロフィールだけを一時停止として表示する。私的APIは503 `data_unavailable` を返す。
 
-地図は1画面構成。SP下部ナビは「みんな／タイムライン／記録／じぶん」で、期間・件数を上部、全体表示と地図種類を
-地図上の補助操作として表示する。2026-09-20時点の本番Versionは `be322ae7-5354-41d3-82c9-91b672d513d1`、
-配備元コードはPR #8を含む `b6ad5ac`（後続は文書更新のみ）。
+地図は1画面構成。ナビは「プロフィール／記録／設定」で、期間・件数を上部、更新者のStories型人物列を地図上に表示する。
+右上は自動位置記録のON/OFFだけを常設し、地図種類とミュートは設定画面にある。2026-09-21時点の本番Versionは
+`d43a7e3b-cb07-408f-905e-d8f1cbbf8512`、配備元コードはPR #14のmerge commit `6f8c4b0`。
+
+## Issues #9〜#13 の本番反映（2026-09-21）
+
+- 配備元は main の merge commit `6f8c4b09ed8cf14da3b773ddf813a71d8582d8cf`。マージ直前 head `4bafc50` の CI run `35518255675` が core/browser とも成功し、マージ結果のツリーは検証済み head と同一。ローカルでも型検査・Nodeテスト83件・ビルド・0011..0015の移行統合・索引回帰・通常Chromium18件・実MapLibre7件＋ライフサイクル4件を再確認した。
+- 本番D1 `travelmap`をSQLエクスポートでバックアップし、隔離SQLiteへ復元して件数一致・`integrity_check` ok・外部キー違反0を確認。保存先はGit管理外の`github-account-migration/data-backups/travelMap-production-2026-09-21-pre-0013-0015.sql`。
+- 適用前に実構造を読み、`user_mutes`・`public_read_cursors`・`public_entry_sequence`が存在しないことを確認してから`0013`→`0014`→`0015`を`d1 execute --remote --file`で一度ずつ実行した。`d1_migrations`台帳は空のままで、これを根拠に再適用しない。0015は再実行不可（`ALTER TABLE ... RENAME`と`CREATE TABLE`を含む）。
+- 適用後に列・索引・外部キーを確認。`public_read_cursors`は`last_seen_seq`形式、旧`public_read_cursors_legacy`はアーカイブとして保持。既存users 4件・activities 353件・transactions 267件・public_entries 353件・支出合計396,095円を維持。
+- 本番Workerは上記Versionを100%配備。既存secret（`GOOGLE_CLIENT_SECRET`・`SESSION_ENCRYPTION_KEY`）は再作成していない。公開画面・公開API・新規JS資産は200、未認証の`/api/private/me`・`viewer-feed`・`mutes`・`read-cursor`は401。
+- 本人の認証済みセッションで`/api/private/viewer-feed`と`/api/private/mutes`が200を返し、`publication_seq`（299〜351）と`unread`が機能することを確認。`public_entry_sequence`は初回観測で353件を採番した。
+- 未確認: 再生動作の本番実行（本人の既読カーソルを更新するため実施しない）、ミュート切替の本番実行、iPhone実機、実GPS。
+- Workerの復旧は旧Version `be322ae7-5354-41d3-82c9-91b672d513d1`へ戻す。DBは追加テーブルを削除せず、新しい書き込みを確認してからバックアップとの整合を取る。
 
 ## Issues #2〜#7 の本番反映（2026-09-20）
 

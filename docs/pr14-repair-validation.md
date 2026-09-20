@@ -51,3 +51,23 @@ CI run `35517251623` が検証対象。ActionsのcheckoutはGitHubが作ったPR
 
 関連正本: [実装詳細](issues-9-13-implementation.md)、[CODEMAP](../CODEMAP.md)。
 一時転送ファイル・書込workflowは最終ツリーから撤去し、通常CIはcontents:readを維持する。
+
+## 本番反映の記録（2026-09-21）
+
+検証済みhead `4bafc50` とCI run `35518255675`（core/browser成功）を対象にDraftを解除し、
+`--match-head-commit` を指定してmainへマージした。実マージSHAは
+`6f8c4b09ed8cf14da3b773ddf813a71d8582d8cf`。PRブランチはmainの直系子孫だったため、
+マージ結果のツリーは検証済みheadと同一で、再検証は不要だった。
+マージ前にローカルで型検査・Nodeテスト83件・ビルド・0011..0015の移行統合・索引回帰・
+通常Chromium18件・実MapLibre7件＋ライフサイクル4件、本番設定でのdry-runを再実行した。
+
+本番D1はバックアップ後に隔離SQLiteへ復元して健全性を確認し、実構造を読んだうえで
+未適用の0013→0014→0015だけを一度ずつ適用した。`d1_migrations`台帳は空のままで根拠に使っていない。
+Worker Versionは `d43a7e3b-cb07-408f-905e-d8f1cbbf8512` を100%配備。復旧先は `be322ae7-...`。
+
+本番で確認: 公開画面・新規JS資産200、未認証の私的API401、本人セッションでの
+`viewer-feed`・`mutes` 200と`publication_seq`/`unread`、`public_entry_sequence` 353件採番、
+旧常設UI（＋/−・みんな・全ルート・地図種類）0件、ナビ「プロフィール／記録／設定」、
+右上の自動記録ON/OFF、設定内の地図種類とミュート、Stories列と地図の人物一致。
+
+本番で未実施: 再生動作とミュート切替（本人の既読・ミュートを実際に更新するため）、iPhone実機、実GPS。
