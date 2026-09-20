@@ -1,0 +1,23 @@
+name: PR8 source snapshot (diagnostic only)
+on:
+  push:
+    branches: ['diagnostic/pr8-geolocation-root-cause-20260920']
+    paths: ['.github/workflows/pr8-source-snapshot.yml']
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2256782143bda1d56a8819c15a645c2c112afd22
+          persist-credentials: false
+      - name: Archive only tracked app, test and design files
+        run: git archive --format=zip --output=pr8-source.zip HEAD cloudflare data_model docs CODEMAP.md .github
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr8-source-snapshot
+          path: pr8-source.zip
+          retention-days: 7
