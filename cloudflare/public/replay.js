@@ -65,7 +65,7 @@ export function makeReplay(map,shell,{tracks,begin,end}){
     // Finish the old-rate interval before installing the new multiplier.
     speed.value=String(currentSpeed);if(playing)advance(performance.now());currentSpeed=requested;speed.value=String(requested);value.value=requested.toFixed(2)+'×';speed.setAttribute('aria-valuetext',requested.toFixed(2)+'倍');
   };
-  seek.oninput=()=>{pause();seekTo(seek.value);};next.onclick=()=>{const point=timeline?.order.find(p=>p.kind==='record'&&p.ms>elapsed);seekTo(point?point.ms/timeline.duration:1);};
+  seek.oninput=()=>{const requested=Number(seek.value);pause();seekTo(requested);};next.onclick=()=>{const point=timeline?.order.find(p=>p.kind==='record'&&p.ms>elapsed);seekTo(point?point.ms/timeline.duration:1);};
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&active)pause();});
   window.addEventListener('pagehide',finish);document.addEventListener('tm:auth-lost',finish);
   map.on('basemapchanging',()=>{styleReady=false;});map.on('style.load',()=>{styleReady=true;if(active)draw();});

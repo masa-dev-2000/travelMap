@@ -68,7 +68,7 @@ export async function mountAutoLocation(slot){
   });
   document.addEventListener('visibilitychange',()=>control.setVisible(!document.hidden));
   window.addEventListener('pagehide',()=>control.setVisible(false));
-  window.addEventListener('pageshow',event=>{if(event.persisted){control.stop('オフ・再開するにはスイッチを押してください');try{sessionStorage.removeItem(HANDOFF);}catch{}}});
+  window.addEventListener('pageshow',event=>{if(event.persisted){navigating=false;control.stop('オフ・再開するにはスイッチを押してください');try{sessionStorage.removeItem(HANDOFF);}catch{}}});
   document.addEventListener('tm:auth-lost',()=>{control.stop('ログイン状態が変わったため停止しました');toggle.disabled=true;log.disabled=true;for(const dialog of document.querySelectorAll('.auto-location-dialog'))dialog.close();try{sessionStorage.removeItem(HANDOFF);}catch{}});
   document.addEventListener('click',event=>{if(event.target.closest?.('#logout'))document.dispatchEvent(new Event('tm:auth-lost'));},{capture:true});
   document.addEventListener('submit',event=>{if(event.target.action&&new URL(event.target.action).pathname==='/auth/logout'){control.stop();try{sessionStorage.removeItem(HANDOFF);}catch{}}},{capture:true});

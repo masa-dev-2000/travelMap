@@ -72,3 +72,22 @@ test('handoff keeps next deadline; user mismatch cannot resume; samples during r
   const different=captureFixture({lease:async()=>({owner:'b'})});await different.instance.start(handoff);assert.equal(different.instance.state().enabled,false);
   f.instance.stop();next.instance.stop();
 });
+
+test('OFF during handoff preparation invalidates late response; navigation pagehide preserves prepared lease',async()=>{
+  let resolve:any;const commands:string[]=[];
+  const f=captureFixture({lease:async body=>{commands.push(body.command);if(body.command==='prepare')return new Promise(r=>{resolve=r;});return {owner:'a'};}});
+  await f.instance.start();const preparing=f.instance.prepareHandoff('/admin/record/','a'.repeat(64));await flush();f.instance.stop();
+  resolve({owner:'a',expires_at:f.time.now()+15000,next_at:f.time.now()+300000});assert.equal(await preparing,null);assert.equal(f.instance.state().enabled,false);
+  assert.ok(commands.includes('stop'));
+  const nextCommands:string[]=[];const next=captureFixture({lease:async body=>{nextCommands.push(body.command);return {owner:'a',expires_at:99,next_at:Date.parse(at)+300000};}});
+  await next.instance.start();await next.instance.prepareHandoff('/admin/record/','a'.repeat(64));next.instance.setVisible(false);
+  assert.deepEqual(nextCommands,['start','prepare']);next.instance.stop();assert.equal(nextCommands.at(-1),'stop');
+});
+test('claim retry uses identical new credentials and never falls back to normal start',async()=>{
+  const commands:any[]=[];let tries=0;
+  const f=captureFixture({lease:async body=>{commands.push(body);if(body.command==='claim'&&++tries===1)throw Error('lost response');return {owner:'a',next_at:Date.parse(at)+300000};}});
+  await f.instance.start({token:'a'.repeat(64),destination:'/admin/record/',owner:'a'});
+  assert.equal(commands.length,2);assert.deepEqual(commands[0],commands[1]);assert.equal(commands[0].command,'claim');assert.equal(f.saved.length,0);f.instance.stop();
+  const failed=captureFixture({lease:async body=>{if(body.command==='claim')throw Object.assign(Error('expired'),{status:409});return {owner:'a'};}});
+  await failed.instance.start({token:'a'.repeat(64),destination:'/admin/record/',owner:'a'});assert.equal(failed.instance.state().enabled,false);assert.equal(failed.saved.length,0);
+});
