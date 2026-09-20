@@ -43,8 +43,8 @@
 - `cloudflare/migrations/`: D1スキーマの履歴。番号順に適用し、既存migrationを書き換えない。
 - D1 binding `DB`: ユーザー、記録、旅、分類、取引、公開設定、足あと等の構造化データ。
 - R2 binding `FILES`: 非公開添付、公開写真、ユーザーアイコンのオブジェクト。
-- `cloudflare/wrangler.production.jsonc`: 本番Worker、D1、R2、公開変数の構成。秘密値はWrangler secretに置き、ファイルへ保存しない。
-- `cloudflare/scripts/cloudflare.mjs`: プロジェクト固有のWrangler実行補助。
+- `cloudflare/wrangler.production.jsonc`: **本番環境で生成・保持するGit管理外ファイル**。本番Worker、D1、R2、公開変数の構成。秘密値はWrangler secretに置き、リポジトリへ保存しない。現在のGit正本から実値を復元できるとは扱わない。
+- `cloudflare/scripts/cloudflare.mjs`: 本番Wrangler実行補助。実行にはCloudflare認証プロファイルと上記Git管理外設定が必要。チャット/GitHub接続だけで本番設定が存在すると推定しない。
 - `cloudflare/scripts/prepare-assets.mjs`: npm依存から配信用アセットを準備するpredev/prebuild処理。
 
 ### 自動位置のDBと索引（PR #8）
@@ -77,6 +77,13 @@
 | 実MapLibre/WebGLの限定試験 | `cloudflare/tests/browser-real-map.py`（空の地図スタイル/API/GPSは合成） |
 
 CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジョブ。合格判定は対象コミットの実行結果による。iPhone・実測GPS・実地図タイルの合格を意味しない。
+
+## 現在の公開状態（2026-09-20）
+
+- Issues #2〜#7 は PR #8 で main にマージ済み。merge commit: `b6ad5ac574545a79211018cf041680a9afbd1f04`。
+- マージ直前 head `27c28a6817ff1b6a6f50cdc85a6a03d3f599bccf` の CI run `35509777387` は core/browser と実MapLibre/WebGL限定試験が成功。
+- ただし上記は本番配備を意味しない。本番D1の0011/0012適用、本番Workerデプロイ、iPhone実機/実GPS確認は別状態として管理する。
+- Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。実本番IDを含む `wrangler.production.jsonc` はGit管理外のため、本番作業前に実行環境で存在・対象アカウント/D1/R2を照合する。
 
 ## 正本
 
