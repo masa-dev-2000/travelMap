@@ -86,6 +86,17 @@ CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジ
 - 本番D1は初期投入由来の既存スキーマを持つが、`d1_migrations`台帳は空。0011/0012はSQLファイルを直接実行した。Wranglerの`migrations apply`は既存の0001以降も未適用と表示するため、そのまま実行しない。
 - Git管理下の `cloudflare/wrangler.jsonc` はローカル専用。実本番IDを含む `wrangler.production.jsonc` はGit管理外のため、本番作業前に実行環境で存在・対象アカウント/D1/R2を照合する。
 
+## Issues #9〜#13（実装ブランチ）
+
+- `viewer-state.js`: 選択人物・期間・ミュート・未読のブラウザ共通状態。
+- `stories-strip.js`: 地図上のStories型人物列。既読も残し、未読をリング表示。
+- `playback-controller.js`: 誰を再生するかを決定し、1人の再生は`story.js`へ委譲。
+- `0013-user-mutes.sql`: viewer/author単位のミュート。
+- `0014-public-read-cursors.sql`: viewer/author単位の公開記録既読カーソル。
+- 公開フィードはviewer-neutralのまま維持し、個人のミュート/未読は`/api/private/viewer-feed`で扱う。
+- UIはプロフィール/記録/設定の3ナビへ移行し、地図種類・ミュートを設定へ集約する。
+- この節は `feat/issues-9-13-map-social-playback` の実装状態。main/本番反映済みとは扱わない。
+
 ## 正本
 
 - Issue #2〜#7の実装・修正・配備条件: [docs/issues-2-7-implementation.md](docs/issues-2-7-implementation.md)（PR #8の作業内容。main/本番の状態とは区別）
