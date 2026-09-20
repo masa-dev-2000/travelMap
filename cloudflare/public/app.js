@@ -49,6 +49,7 @@ function playPerson(handle,trip){
   const chosen=trip===undefined?options:options.filter(option=>option.trip===trip);story.open('旅を再生',chosen.length?chosen:options.slice(-1));
 }
 window.__tm={everyone,route,shell,replay,story,viewerState};// 画面確認用(コンソールから状態を読む)
+const mapStyleSettings=$('#map-style-settings');if(mapStyleSettings){const move=document.querySelector('.basemap-control');if(move){move.open=true;mapStyleSettings.append(move);}}
 const stories=me?makeStoriesStrip(shell.stage,{state:viewerState,onSelect:handle=>{viewerState.select(handle);everyone.selectPerson?.(handle);stories.render(everyone.viewerUsers?.()||[]);}}):null;
 async function refreshViewer(){if(!me)return;try{const data=await apiPrivate('viewer-feed');viewerState.setMuted(data.muted||[]);viewerState.setUnread(data.users||[]);stories.render((data.users||[]).map(u=>({...u,self:me.handle})));}catch{}}
 await everyone.ready;
