@@ -234,4 +234,17 @@ class BrowserTests(unittest.TestCase):
             for selector in ['.replay-speed','.replay-stop','.replay-progress']:
                 self.assertTrue(p.locator(selector).evaluate("e=>{const r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}"),selector)
             p.get_by_role('button',name='再生を終了',exact=True).click()
+    def test_self_shared_url_stays_public_only(self):
+        p=self.page;p.goto(self.origin+'/?play=test');p.wait_for_function('__tm.player.active()')
+        self.assertEqual(p.evaluate('__tm.player.state().total'),1)
+        self.assertEqual(p.evaluate('__tm.player.state().step.id'),'my-public')
+        p.wait_for_timeout(700);self.assertEqual(self.read_posts,[])
+        expect(p.locator('.tm-record-card h2')).to_have_text('my-public')
+    def test_obscured_card_is_not_marked_read(self):
+        p=self.page;p.goto(self.origin+'/');expect(p.locator('.stories-strip')).to_be_visible()
+        p.evaluate("{const overlay=document.createElement('div');overlay.id='test-cover';Object.assign(overlay.style,{position:'fixed',inset:'0',zIndex:'99999',background:'white'});document.body.append(overlay);}")
+        p.evaluate('__tm.playback.play()');p.wait_for_function('__tm.player.active()');p.wait_for_timeout(700)
+        self.assertEqual(self.read_posts,[])
+        p.evaluate("document.querySelector('#test-cover').remove();__tm.player.pause();__tm.player.resume();")
+        p.wait_for_timeout(900);self.assertGreater(len(self.read_posts),0)
 if __name__=='__main__':unittest.main(verbosity=2)

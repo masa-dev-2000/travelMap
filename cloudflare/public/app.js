@@ -26,7 +26,7 @@ const login=()=>el('a',{className:'quick-record',href:'/auth/google?next=%2F',te
 const groups=[
   {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),$('#me-filters'),$('#money-panel'),$('#trip-form').closest('details'),$('#activities').closest('section')]:[login()]},
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:me?[el('a',{className:'quick-record',href:'/admin/start/',textContent:'記録をはじめる'}),$('#add-forms')]:[login()],action:()=>{if(me&&innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
-  {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[],action:()=>{player.pause();settings.showModal();void viewerSettings.render();return true;}}
+  {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[],action:()=>{playback.suspend();settings.showModal();void viewerSettings.render();return true;}}
 ];
 if(!me){
   profile.remove();
@@ -41,7 +41,7 @@ let mine=null,locations=null,noticeTimer,authEpoch=0;
 function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
 const player=makeStory(map,shell,{begin:()=>{shell.hide();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 async function markRead(step){
-  if(document.hidden||!step.publicEntryId||viewerState.state().muted.has(step.author))return;
+  if(document.hidden||step.author===me?.handle||!step.publicEntryId||viewerState.state().muted.has(step.author))return;
   const epoch=authEpoch;
   if(!me){viewerState.markSeen(step.author,step.publication_seq);return;}
   const result=await api('read-cursor',{entry_id:step.publicEntryId});
@@ -66,6 +66,7 @@ function choose(title,options){return new Promise(resolve=>{
 });}
 const playback=makePlaybackController({state:viewerState,player,refresh:options=>everyone.reload(options),loadGroup:group=>everyone.groupData(group),markRead,notify,choose});
 player.onPlay(()=>void playback.play());
+shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&event.detail!=='playback-options')playback.suspend();});
 const viewerSettings=makeViewerSettings({state:viewerState,reload:()=>everyone.reload(),cancelReload:everyone.cancelReload,notify,authenticated:!!me,slot:$('#mute-settings')});
 $('#close-settings').onclick=()=>settings.close();settings.addEventListener('click',event=>{if(event.target===settings)settings.close();});
 window.__tm={viewerState,everyone,route,shell,player,playback,stories};
@@ -80,7 +81,19 @@ if(me){
 const shared=new URLSearchParams(location.search);
 if(shared.get('play')){
   const handle=shared.get('play'),trip=shared.get('trip')??'',options=everyone.storyOptions(handle).filter(o=>o.trip===trip);
-  if(options.length)void playback.openOptions('旅を再生',options,{publicEntries:true});else notify('この人の公開記録はないか、ミュート中です');
+  if(handle===me?.handle){
+    const option={label:'自分の公開記録',load:async signal=>{
+      const response=await fetch('/api/public/entries?'+new URLSearchParams({u:handle}),{signal,cache:'no-store'});
+      if(!response.ok)throw new Error('公開記録を取得できません');
+      const data=await response.json();if(!Array.isArray(data.entries))throw new Error('公開記録の応答を確認できません');
+      const rows=data.entries.filter(e=>e.author===handle&&(!trip||e.trip_name===trip));
+      rows.sort((a,b)=>a.date.localeCompare(b.date)||(a.at||'').localeCompare(b.at||'')||a.id.localeCompare(b.id));
+      const result=everyone.groupData({user:{handle,display_name:me.display_name,icon:me.icon,icon_url:me.icon_url,avatar_url:me.avatar_url},rows});
+      // This is public self playback, never the viewer's private activities.
+      result.steps=result.steps.map(step=>({...step,publicEntryId:null}));return result;
+    }};
+    void playback.openOptions('自分の公開記録',[option]);
+  }else if(options.length)void playback.openOptions('旅を再生',options,{publicEntries:true});else notify('この人の公開記録はないか、ミュート中です');
 }
 // A return to the visible tab refreshes metadata, but never auto-resumes playback.
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void everyone.reload();});

@@ -64,8 +64,11 @@ export function mapRecordCard(map,shell) {
   window.addEventListener('pagehide',hide);document.addEventListener('tm:auth-lost',hide);
   map.on('basemapchanging',hide);
   const api={show,hide,current:()=>current,visible:key=>{
-    if(current!==key||document.hidden||document.querySelector('dialog[open]'))return false;
+    if(current!==key||document.hidden||document.querySelector('dialog[open]')||shell.stage.classList.contains('pane-open'))return false;
     const node=floating||(popup.isOpen()?popup.getElement():null);if(!node||!node.getClientRects().length)return false;
-    const r=node.getBoundingClientRect();return r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;
+    const article=node.querySelector('.tm-record-card');if(!article)return false;
+    const r=article.getBoundingClientRect();if(r.width<=0||r.height<=0||r.bottom<=0||r.top>=innerHeight||r.right<=0||r.left>=innerWidth)return false;
+    const x=Math.max(1,Math.min(innerWidth-1,r.left+r.width/2)),y=Math.max(1,Math.min(innerHeight-1,r.top+Math.min(24,r.height/2)));
+    const hit=document.elementFromPoint(x,y);return !!hit&&article.contains(hit);
   }};instances.set(map,api);return api;
 }

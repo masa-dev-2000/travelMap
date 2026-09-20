@@ -1,7 +1,9 @@
 import {playbackQueue} from './viewer-state.js';
 export function makePlaybackController({state,player,refresh,loadGroup,markRead,notify,choose}) {
-  let generation=0,abort=null,queue=[],queueIndex=0,mode='unread',disposed=false;
-  function stop(){generation++;abort?.abort();abort=null;queue=[];queueIndex=0;player.finish(false);}
+  let generation=0,abort=null,queue=[],queueIndex=0,mode='unread',disposed=false,loading=false;
+  function stop(){generation++;abort?.abort();abort=null;loading=false;queue=[];queueIndex=0;player.finish(false);}
+  // A modal or hidden tab must also cancel a not-yet-started playback.
+  function suspend(){if(loading)stop();else player.pause?.();}
   function eligible(snapshot){return !snapshot.selectedUser||snapshot.users.some(u=>u.handle===snapshot.selectedUser);}
   const unsubscribe=state.subscribe((s,reason)=>{
     if(['selection','period','mute','identity','error'].includes(reason)){stop();return;}
@@ -21,7 +23,7 @@ export function makePlaybackController({state,player,refresh,loadGroup,markRead,
     }});
   }
   async function play(){
-    stop();const run=generation,selected=state.state().selectedUser;mode=selected?'selected':'unread';abort=new AbortController();
+    stop();const run=generation,selected=state.state().selectedUser;mode=selected?'selected':'unread';abort=new AbortController();loading=true;
     try{
       const ok=await refresh({signal:abort.signal});if(ok===false)return;
       if(disposed||run!==generation||state.state().selectedUser!==selected||!eligible(state.state()))return;
@@ -30,11 +32,12 @@ export function makePlaybackController({state,player,refresh,loadGroup,markRead,
       const loaded=await Promise.all(groups.map(async group=>({...group,public:true,data:await loadGroup(group,abort.signal)})));
       if(run!==generation||disposed)return;queue=loaded;queueIndex=0;startItem(run);
     }catch(error){if(run===generation&&error.name!=='AbortError')notify(error.message||'再生できませんでした');}
+    finally{if(run===generation){loading=false;abort=null;}}
   }
   // Own trips and shared URLs use the same player, without mixing private steps
   // into the public read queue. An options picker is an entry point, not a player.
   async function openOptions(title,options,{publicEntries=false}={}){
-    stop();const run=generation;mode='selected';abort=new AbortController();
+    stop();const run=generation;mode='selected';abort=new AbortController();loading=true;
     try{
       const option=options.length===1?options[0]:await choose(title,options);
       if(!option||run!==generation)return;
@@ -42,8 +45,10 @@ export function makePlaybackController({state,player,refresh,loadGroup,markRead,
       if(!data?.steps?.length){notify('この期間に再生できる記録はありません');return;}
       queue=[{public:publicEntries,rows:data.steps.filter(s=>s.publicEntryId).map(s=>({id:s.publicEntryId})),data:structuredClone(data)}];queueIndex=0;startItem(run);
     }catch(error){if(run===generation&&error.name!=='AbortError')notify(error.message||'再生できませんでした');}
+    finally{if(run===generation){loading=false;abort=null;}}
   }
   const authLost=()=>{stop();state.clear();};
-  document.addEventListener('tm:auth-lost',authLost);
-  return {play,stop,openOptions,state:()=>({generation,mode,index:queueIndex,total:queue.length,author:queue[queueIndex]?.user?.handle||null}),destroy(){disposed=true;stop();unsubscribe();document.removeEventListener('tm:auth-lost',authLost);}};
+  const visibility=()=>{if(document.hidden)suspend();};
+  document.addEventListener('visibilitychange',visibility);document.addEventListener('tm:auth-lost',authLost);
+  return {play,stop,suspend,openOptions,state:()=>({generation,mode,index:queueIndex,total:queue.length,author:queue[queueIndex]?.user?.handle||null}),destroy(){disposed=true;stop();unsubscribe();document.removeEventListener('tm:auth-lost',authLost);document.removeEventListener('visibilitychange',visibility);}};
 }

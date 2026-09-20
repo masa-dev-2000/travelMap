@@ -43,3 +43,11 @@ test('both selected and unread players receive read callback; hidden document ne
 test('queue advances one person at a time, then ends instead of replaying read history',async()=>{
  const h=harness(state());await h.c.play();assert.equal(h.loads[0].data.title,'b');h.loads[0].options.onComplete();assert.equal(h.loads[1].data.title,'a');h.loads[1].options.onComplete();assert.equal(h.c.state().total,0);assert.equal(h.notices.at(-1),'新しい記録はありません');h.c.destroy();
 });
+
+test('pending playback is cancelled when page hides or settings suspends it',async()=>{
+ for(const hide of [true,false]){
+  let release:any;const h=harness(state(),()=>new Promise<boolean>(r=>release=r));const pending=h.c.play();
+  if(hide){(h.doc as any).hidden=true;h.doc.dispatchEvent(new Event('visibilitychange'));}else h.c.suspend();
+  release(true);await pending;assert.equal(h.loads.length,0);h.c.destroy();
+ }
+});
