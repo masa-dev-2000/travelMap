@@ -21,20 +21,18 @@
 
 
 /* Compact map chrome approved 2026-09-20. */
-.tm-record-popup{z-index:760!important}
+.vector-map .maplibregl-popup.tm-record-popup{z-index:760!important}.replay-on #map{z-index:730}.replay-on .maplibregl-popup.tm-record-popup{z-index:760!important}.replay-on>.auto-location{z-index:440}
 @media(max-width:700px){
-  .map-heading{top:max(8px,env(safe-area-inset-top));left:12px;right:62px;max-width:none;min-height:44px;max-height:56px;padding:6px 9px;display:flex;align-items:center;gap:7px;overflow:hidden;border-radius:16px;font-size:12px}
-  .map-heading .map-title{font-size:12px;flex:none}.map-heading #map-count{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.map-heading .page-switch{font-size:10px;margin-left:auto}.map-heading .period-chip{grid-column:auto;width:auto;margin:0;height:30px;min-height:30px;padding:0 7px;font-size:10px}
-  .map-heading .travel-badge{font-size:10px;padding:3px 7px}
-  .replay-control.active{left:12px;right:12px;bottom:96px;width:auto;max-width:none;min-height:48px;padding:5px 7px;display:grid;grid-template-columns:38px minmax(90px,1fr) 52px 38px 38px;gap:5px;align-items:center;border-radius:16px;z-index:720}
-  .replay-control.active .replay-play,.replay-control.active button{min-height:38px;height:38px;padding:0 6px;border-radius:12px;font-size:0}
-  .replay-control.active .replay-play{grid-column:1}.replay-control.active .replay-play::first-letter{font-size:17px}
-  .replay-control.active .replay-progress{grid-column:2;width:100%;margin:0;accent-color:#216453}
-  .replay-control.active .replay-speed{grid-column:3;font-size:12px;font-weight:700;color:#16362d;background:#f5f8f3;border-color:#dce4d9}
-  .replay-control.active .replay-speed::after{content:''}
-  .replay-control.active button:not(.replay-play):not(.replay-speed){font-size:0}
-  .replay-control.active button:not(.replay-play):not(.replay-speed)::first-letter{font-size:18px}
+  .map-heading{top:max(8px,env(safe-area-inset-top));left:12px;right:62px;max-width:none!important;min-height:44px;max-height:none;padding:6px 9px;display:flex!important;grid-template-columns:none!important;align-items:center;gap:6px;overflow:visible;border-radius:16px;font-size:12px;white-space:nowrap}
+  .map-heading .map-title{font-size:12px;flex:none}.map-heading #map-count{font-size:10px;min-width:0;overflow:hidden;text-overflow:ellipsis}.map-heading .page-switch{font-size:10px;margin-left:auto;flex:none}.map-heading .period-chip{grid-column:auto!important;width:auto!important;margin:0!important;height:30px;min-height:30px;padding:0 7px;font-size:10px;flex:none}
+  .map-heading .travel-badge{font-size:10px;padding:3px 7px;flex:none}
+  .replay-control.active{left:12px;right:12px;bottom:96px;width:auto!important;max-width:none!important;min-height:50px;padding:5px 7px;display:grid!important;grid-template-columns:38px minmax(76px,1fr) 52px 38px 38px;grid-template-rows:40px;gap:5px;align-items:center;flex-wrap:nowrap;border-radius:16px;z-index:720}
+  .replay-control.active .replay-play{grid-column:1;grid-row:1}
+  .replay-control.active .replay-progress{grid-column:2;grid-row:1;width:100%;margin:0;accent-color:#216453;transform:translateY(-5px)}
+  .replay-control.active .replay-speed{grid-column:3;grid-row:1;width:auto;display:block;font-size:12px;font-weight:700;color:#16362d;background:#f5f8f3;border-color:#dce4d9}
+  .replay-control.active .replay-play,.replay-control.active button{min-height:38px;height:38px;padding:0 6px;border-radius:12px}
+  .replay-control.active .replay-play{font-size:0}.replay-control.active .replay-play::first-letter{font-size:17px}
+  .replay-control.active button:not(.replay-play):not(.replay-speed){font-size:0}.replay-control.active button:not(.replay-play):not(.replay-speed)::first-letter{font-size:18px}
   .replay-control.active .replay-date{position:absolute;left:48px;right:136px;top:31px;padding:0;background:transparent;color:#647264;text-align:center;font:500 9px/12px system-ui;pointer-events:none}
-  .replay-control.active .replay-progress{transform:translateY(-5px)}
   .replay-control.active button[hidden],.replay-control.active input[hidden],.replay-control.active span[hidden]{display:none!important}
 }
