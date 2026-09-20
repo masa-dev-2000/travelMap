@@ -17,12 +17,14 @@ jobs:
       - name: Validate source versions and apply the bounded regression
         run: |
           python - <<'PY'
-          import pathlib,hashlib,subprocess
+          import pathlib,hashlib,subprocess,ast
           bases={'cloudflare/public/panel-me.js':'77360063e43fa9c6625af71a443424fc943cdb87','cloudflare/tests/browser-smoke.py':'94b6e56e5ca5407b0093ff2f798fb259ae344d03','cloudflare/tests/browser-real-map.py':'6957e49ba1711270d85e815a558bb568ae21ed41'}
+          expected={'cloudflare/public/panel-me.js':'5afc9fa9c82296262fca3ed46b49a3fbfe4b932a','cloudflare/tests/browser-smoke.py':'5d1606f9108bcdd84b4e421bedc2af054f9cba92','cloudflare/tests/browser-real-map.py':'541a965169b8d625abf5feacae2fb3da397ed463'}
+          blob=lambda b:hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()
           data={}
           for name,sha in bases.items():
               p=pathlib.Path(name);assert not p.is_symlink();b=p.read_bytes()
-              assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()==sha,'Concurrent change: '+name
+              assert blob(b)==sha,'Concurrent change: '+name
               data[name]=b.decode()
           name='cloudflare/public/panel-me.js';s=data[name]
           old='async function refresh(){await Promise.all([summary(),activities(),transactions()]);everyone.reload();}'
@@ -61,8 +63,6 @@ jobs:
                   self.api(feeds.pop());p.wait_for_function('__tm.player.active()')
                   self.assertEqual(p.evaluate('__tm.player.state().author'),'friend')
           """
-          # Embedded lines carry eight extra spaces after the first line.
-          test='\n'.join(line[8:] if i and line.startswith('        ') else line for i,line in enumerate(test.split('\n')))
           marker="if __name__=='__main__':unittest.main(verbosity=2)"
           assert s.count(marker)==1 and 'def test_play_during_profile_bootstrap' not in s
           data[name]=s.replace(marker,test+marker)
@@ -70,8 +70,11 @@ jobs:
           data[name]=s.replace(old,old+",'BrowserTests.test_play_during_profile_bootstrap'")
           assert "('browser-playback-lifecycle.py', [], '0')" in data[name]
           assert "('browser-playback-lifecycle.py', [], '1')" in data[name]
+          for name,s in data.items():
+              assert blob(s.encode())==expected[name],'Unexpected result: '+name
+              if name.endswith('.py'):ast.parse(s)
           for name,s in data.items():pathlib.Path(name).write_text(s)
-          subprocess.run(['python','-m','py_compile','cloudflare/tests/browser-smoke.py','cloudflare/tests/browser-real-map.py'],check=True)
+          subprocess.run(['node','--check','cloudflare/public/panel-me.js'],check=True)
           subprocess.run(['git','add','--',*bases],check=True)
           subprocess.run(['git','diff','--cached','--check'],check=True)
           PY
