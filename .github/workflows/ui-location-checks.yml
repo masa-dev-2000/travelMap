@@ -1,0 +1,35 @@
+name: UI and private location checks
+on:
+  pull_request:
+    paths: ['cloudflare/**', 'data_model/**', '.github/workflows/ui-location-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: cloudflare/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+        working-directory: cloudflare
+      - run: npm run check && npm test && npm run build
+        working-directory: cloudflare
+      - run: python cloudflare/tests/check-location-migration.py
+      - run: pip install playwright==1.55.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python cloudflare/tests/browser-smoke.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-location-test-artifacts
+          path: test-artifacts/
+          if-no-files-found: ignore
