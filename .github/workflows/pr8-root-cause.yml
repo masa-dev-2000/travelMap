@@ -1,0 +1,34 @@
+name: PR8 geolocation root cause (diagnostic only)
+on:
+  push:
+    branches: ['diagnostic/pr8-geolocation-root-cause-20260920']
+    paths: ['.github/workflows/pr8-root-cause.yml', 'cloudflare/tests/pr8-root-cause.py']
+permissions:
+  contents: read
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci && node scripts/prepare-assets.mjs
+        working-directory: cloudflare
+      - run: pip install playwright==1.55.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Compare original fixture, fresh native fix, and real referrer policy
+        run: python cloudflare/tests/pr8-root-cause.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr8-root-cause-evidence
+          path: test-artifacts/root-cause/
+          if-no-files-found: warn
+          retention-days: 7
