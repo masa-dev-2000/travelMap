@@ -148,3 +148,32 @@ read or internal-ID fields.
 Not verified in production: playback itself, because running it would update the
 owner's real read cursors; mute toggling, for the same reason; iPhone hardware and
 live GPS. Those remain covered only by the automated cases above.
+
+## Sequence reseed (0016)
+
+Production verification with a test viewer showed that default unread playback did not
+follow time. `ensurePublicOrder` assigns the sequence with
+`ORDER BY COALESCE(publish_at,''), rowid`, and every pre-existing publication has a NULL
+`publish_at`, so 0015's one-pass seeding fell back to insertion rowid. For the imported
+history that order is unrelated to when the records happened: masa's 300 entries contained
+140 backward date steps, 106 of them jumping back more than a week and the worst 249 days.
+The three seeded demo accounts, written in date order, showed none.
+
+This is a defect in the seeded data, not in the ordering contract. The contract — a stable
+first-visible sequence that editing a date cannot reorder — still holds, and entries
+published from now on take their number as they become eligible, which is already
+chronological. Only the single batch that 0015 adopted was wrong.
+
+`0016-reseed-public-order.sql` renumbers the existing rows in the order the feed and
+selected playback already use (`date`, `occurred_at`, `id`), in place, so the table
+definition and `AUTOINCREMENT` behaviour are unchanged and later entries keep taking higher
+numbers rather than slotting into their date. Sequence numbers are shifted clear of the
+target range first because `seq` is the rowid. Existing cursors recorded a position in the
+old numbering, which no longer identifies the same set, so they restart at zero rather than
+silently hiding unseen records — the same conservative choice 0015 made.
+
+`check-location-migration.py` seeds four entries whose insertion order contradicts their
+dates, reproducing the production shape, and asserts the replay order afterwards. It fails
+against 0011..0015 alone and passes with 0016. The same file's migration glob previously
+matched local-only `*.local.sql` fixtures and crashed in any working tree that had them;
+it now selects numbered migrations only.
