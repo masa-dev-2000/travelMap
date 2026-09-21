@@ -140,7 +140,30 @@ $('#assign-form').onsubmit=async event=>{
 };
 bindForm('#category-form','categories',value=>value,bootstrap);
 $('#transaction-form [name=kind]').onchange=txCategories;
-$('#locate').onclick=()=>{if(!navigator.geolocation){notify('現在地を取得できないブラウザです');return;}navigator.geolocation.getCurrentPosition(position=>{$('#activity-form [name=latitude]').value=position.coords.latitude;$('#activity-form [name=longitude]').value=position.coords.longitude;notify('現在地を入力しました');},()=>notify('現在地を取得できません。位置情報の許可を確認してください。'));};
+// 記録画面と同じ扱いに揃える: フォームを開いた時点で位置を取りにいき、精度が上がれば置き換える。
+// 手で座標を直した人の値は上書きしない。閉じたら監視を止め、地図を見ているだけで測り続けない。
+let quickWatch=null,quickBest=null,quickTyped=false,quickOpen=false;
+const quickState=()=>$('#locate-state'),quickLat=()=>$('#activity-form [name=latitude]'),quickLng=()=>$('#activity-form [name=longitude]');
+function quickLocateStop(){if(quickWatch!==null){navigator.geolocation.clearWatch(quickWatch);quickWatch=null;}}
+function quickLocateStart(){
+  quickLocateStop();quickBest=null;
+  if(!navigator.geolocation){quickState().textContent='この端末では位置を取得できません';return;}
+  if(quickTyped){quickState().textContent='手で入れた位置を使います';return;}
+  quickState().textContent='位置を取得中…';
+  quickWatch=navigator.geolocation.watchPosition(result=>{
+    if(quickTyped){quickLocateStop();return;}
+    if(quickBest!==null&&result.coords.accuracy>quickBest)return;
+    quickBest=result.coords.accuracy;
+    quickLat().value=result.coords.latitude;quickLng().value=result.coords.longitude;
+    quickState().textContent=`位置 ±${Math.round(quickBest)}m`;
+  },()=>{if(quickBest===null)quickState().textContent='位置を取得できません。位置情報の許可を確認してください';},
+  {enableHighAccuracy:true,maximumAge:30000,timeout:20000});
+}
+for(const input of [quickLat(),quickLng()])input.addEventListener('input',()=>{quickTyped=true;quickLocateStop();quickState().textContent='手で入れた位置を使います';});
+shell.drawer.addEventListener('viewchange',event=>{quickOpen=event.detail==='add';if(quickOpen)quickLocateStart();else quickLocateStop();});
+// 保存後は次の記録のために取り直す。閉じている間は測らない。
+$('#activity-form').addEventListener('reset',()=>{quickTyped=false;if(quickOpen)queueMicrotask(quickLocateStart);});
+$('#locate').onclick=()=>{quickTyped=false;quickLocateStart();};
 $('#publish-default').onchange=async event=>{const input=event.target;input.disabled=true;try{await api('settings',{publish_default:input.checked});notify(input.checked?'新しい記録は最初からみんなに見せます':'新しい記録は最初は自分だけに見えます');}catch(error){input.checked=!input.checked;notify(error.message);}finally{input.disabled=false;}};
 // 旅モード: オンの間だけみんなの地図に出る。自動オフは日数で送り、サーバーが期限(map_visible_until)にする
 const travelBadge=el('span',{className:'travel-badge',textContent:'旅モード中',hidden:true});shell.count.before(travelBadge);

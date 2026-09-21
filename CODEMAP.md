@@ -24,7 +24,7 @@
 
 - `cloudflare/public/map-shell.js` / `map-shell.css`: PC・SP共通の地図シェル、ナビゲーション、パネル配置。
 - `cloudflare/public/panel-everyone.js`: 公開記録、人物、期間フィルター、取得失敗時の縮退表示。`reload({maxAge})` は手元のフィードがその新しさなら再取得しない。タブ復帰など受動的な更新だけが使い、保存・ミュート・再生は必ず読み直す。
-- `cloudflare/public/panel-me.js`: ログイン中だけ読み込む私的記録、旅、分類、収支、公開設定、プロフィール。
+- `cloudflare/public/panel-me.js`: ログイン中だけ読み込む私的記録、旅、分類、収支、公開設定、プロフィール。記録フォームを開いている間だけ位置を取得し、手入力された座標は上書きしない。
 - `cloudflare/public/owner-map.js` / `owner-route.js`: MapLibre上の本人用地点・経路・区間選択。
 - `cloudflare/public/route.js`: 公開記録の経路データ構築。
 - `cloudflare/public/story.js`: 全再生入口が使う1人用プレイヤー。小型バー・速度タップ・記録カード。旧 `replay.js` は撤去。
