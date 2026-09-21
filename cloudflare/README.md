@@ -5,8 +5,9 @@ Google OIDCで認証し、7日間の認証付き暗号化Cookieでログイン�
 D1由来の記録・プロフィールだけを一時停止として表示する。私的APIは503 `data_unavailable` を返す。
 
 地図は1画面構成。ナビは「プロフィール／記録／設定」で、期間・件数を上部、更新者のStories型人物列を地図上に表示する。
-右上は自動位置記録のON/OFFだけを常設し、地図種類とミュートは設定画面にある。2026-09-21時点の本番Versionは
-`d43a7e3b-cb07-408f-905e-d8f1cbbf8512`、配備元コードはPR #14のmerge commit `6f8c4b0`。
+右上は自動位置記録のON/OFFだけを常設し、地図種類とミュートは設定画面にある。地図アイコンは
+アップロード画像→Googleの顔写真→表示名の頭文字の順で決まる。2026-09-21時点の本番Versionは
+`41d39685-e9ad-480f-a9f1-51a21ee8e75f`、配備元コードはPR #16のmerge commit `dc6a3ce`。
 
 ## Issues #9〜#13 の本番反映（2026-09-21）
 
@@ -16,6 +17,7 @@ D1由来の記録・プロフィールだけを一時停止として表示する
 - 適用後に列・索引・外部キーを確認。`public_read_cursors`は`last_seen_seq`形式、旧`public_read_cursors_legacy`はアーカイブとして保持。既存users 4件・activities 353件・transactions 267件・public_entries 353件・支出合計396,095円を維持。
 - 本番Workerは上記Versionを100%配備。既存secret（`GOOGLE_CLIENT_SECRET`・`SESSION_ENCRYPTION_KEY`）は再作成していない。公開画面・公開API・新規JS資産は200、未認証の`/api/private/me`・`viewer-feed`・`mutes`・`read-cursor`は401。
 - 本人の認証済みセッションで`/api/private/viewer-feed`と`/api/private/mutes`が200を返し、`publication_seq`（299〜351）と`unread`が機能することを確認。`public_entry_sequence`は初回観測で353件を採番した。
+
 ## 未読順の振り直し（0016、2026-09-21）
 
 テスト用閲覧者アカウントでの本番検証で、未選択時の未読再生が時系列でないことを検出した。`ensurePublicOrder` の採番は `ORDER BY COALESCE(publish_at,''), rowid` で、既存の公開記録は全件 `publish_at` が NULL のため、0015の一括採番が取り込み順にフォールバックしていた。masaの300件で日付の逆転140か所（7日以上戻る106、最大249日）。
@@ -34,7 +36,8 @@ D1由来の記録・プロフィールだけを一時停止として表示する
 - 振り直し後のカードは `2025/4/7 11:36 → 4/8 12:18 → 4/8 12:52 → 4/8 14:18` と時刻まで昇順
 
 - 未確認: 位置なし記録のピン挙動（本番に該当記録が0件）、非表示タブからの復帰（自動操作でタブを実際に非表示にできず）、iPhone実機、実GPS。
-- Workerの復旧は旧Version `be322ae7-5354-41d3-82c9-91b672d513d1`へ戻す。DBは追加テーブルを削除せず、新しい書き込みを確認してからバックアップとの整合を取る。
+
+現時点のWorker復旧先は `d43a7e3b-cb07-408f-905e-d8f1cbbf8512`（0017適用前の版）。さらに前へ戻す場合は `be322ae7-5354-41d3-82c9-91b672d513d1`。DBは追加テーブル・列を削除せず、新しい書き込みを確認してからバックアップとの整合を取る。
 
 ## Issues #2〜#7 の本番反映（2026-09-20）
 
