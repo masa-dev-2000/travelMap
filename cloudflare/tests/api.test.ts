@@ -279,15 +279,18 @@ test('login next only accepts / and /admin paths; profile settings validate hand
   await owner('/api/private/settings',{handle:'local'});
 });
 
-test('map icon accepts up to two emoji, rejects markup and long text, and reaches the public feed',async()=>{
-  for(const icon of ['<b>','abc','🚐🚐🚐',5,'a&'])assert.equal((await owner('/api/private/settings',{icon})).status,400);
-  assert.equal((await owner('/api/private/settings',{icon:'🚐'})).status,200);
-  assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon,'🚐');
+test('the emoji marker is gone: settings ignore it and the public feed never carries one',async()=>{
+  const ignored=await owner('/api/private/settings',{icon:'🚐'});
+  assert.equal(ignored.status,400,'an emoji is no longer a recognised profile change');
+  assert.equal((await ignored.json()).error,'変更がありません');
+  const me=await(await owner('/api/private/bootstrap')).json();
+  assert.ok(!('icon' in me.user),'bootstrap must not expose an emoji marker');
   await owner('/api/private/activities',activity({memo:'ICON',publish:true}));
   const feed=await(await handle(request('/api/public/entries?u=local'),env)).json();
-  assert.ok(feed.entries.length&&feed.entries.every(e=>e.author_icon==='🚐'&&'author_avatar' in e));
-  assert.equal((await owner('/api/private/settings',{icon:''})).status,200);
-  assert.equal((await(await owner('/api/private/bootstrap')).json()).user.icon,null);
+  assert.ok(feed.entries.length);
+  assert.ok(feed.entries.every(e=>!('author_icon' in e)),'public feed must not carry an emoji marker');
+  assert.ok(feed.entries.every(e=>'author_avatar' in e&&'author_icon_url' in e),'image and avatar stay');
+  await assert.rejects(env.DB.prepare('SELECT icon FROM users').all(),'the column itself must be gone');
 });
 
 test('status line: saved and cleared, 40 characters and one line at most, in the feed only while travel mode is on',async()=>{
@@ -485,8 +488,8 @@ test('sign-up: first Google login lands on /signup/, nothing works before the te
   assert.equal((await env.DB.prepare('SELECT terms_accepted_at FROM users WHERE id=?').bind(uid).first()).terms_accepted_at,null);
   const done=await as(cookie,'/api/private/signup',{accept:true,display_name:'さいん',handle:'signup-one',icon:'🚐',map_visible:false,publish_default:true,publish_precision:'city',bio:'IGNORED'});
   assert.equal(done.status,200);assert.match(done.headers.get('Content-Type'),/charset=utf-8/);
-  const row=await env.DB.prepare('SELECT display_name,handle,icon,bio,terms_accepted_at,onboarded_at FROM users WHERE id=?').bind(uid).first();
-  assert.deepEqual([row.display_name,row.handle,row.icon,row.bio],['さいん','signup-one','🚐','']);assert.ok(row.terms_accepted_at&&row.onboarded_at);
+  const row=await env.DB.prepare('SELECT display_name,handle,bio,terms_accepted_at,onboarded_at FROM users WHERE id=?').bind(uid).first();
+  assert.deepEqual([row.display_name,row.handle,row.bio],['さいん','signup-one','']);assert.ok(row.terms_accepted_at&&row.onboarded_at);
   const after=await(await as(cookie,'/api/private/bootstrap')).json();
   assert.ok(after.categories.length>5);assert.deepEqual([after.settings.map_visible,after.settings.publish_default,after.settings.publish_precision],[false,true,'city']);
   const category=after.categories.find(c=>c.kind==='activity').id;

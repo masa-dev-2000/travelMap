@@ -1,11 +1,10 @@
 export function el(tag, props={}) { return Object.assign(document.createElement(tag),props); }
 // 現在地マーカー: アップロード画像 → 絵文字 → アバター画像 → 名前の頭文字。ユーザー入力は textContent だけで入れる
-export function whoMarker({image,icon,avatar,name,caption,status,color}){
+export function whoMarker({image,avatar,name,caption,status,color}){
   const node=el('div',{className:'who-marker'}),face=el('span',{className:'who-face'});if(color)node.style.setProperty('--c',color);
   const initial=()=>{face.replaceChildren();face.textContent=[...(name||'?')][0].toUpperCase();};
-  const emoji=()=>{face.replaceChildren();face.textContent=icon;face.classList.add('emoji');};
   const picture=(src,next)=>{const img=el('img',{alt:'',referrerPolicy:'no-referrer'});img.onerror=next;img.src=src;face.replaceChildren(img);};
-  const rest=()=>icon?emoji():avatar?picture(avatar,initial):initial();
+  const rest=()=>avatar?picture(avatar,initial):initial();
   if(image)picture(image,rest);else rest();
   node.append(face);if(caption)node.append(el('span',{className:'who-caption',textContent:caption}));if(status)node.append(el('span',{className:'who-status',textContent:status}));return node;
 }

@@ -177,3 +177,22 @@ dates, reproducing the production shape, and asserts the replay order afterwards
 against 0011..0015 alone and passes with 0016. The same file's migration glob previously
 matched local-only `*.local.sql` fixtures and crashed in any working tree that had them;
 it now selects numbered migrations only.
+
+## Emoji marker removal (0017)
+
+The map marker resolved through four candidates in order: uploaded image, emoji,
+Google avatar, name initial. Removing only the input would have left stored emoji in
+`users.icon` and in the public `author_icon` field, so anyone who later removed their
+image would see an emoji they could no longer edit. The column is dropped with the input.
+
+`0017-drop-user-emoji-icon.sql` drops `users.icon`. `icon_version`, which points at the
+uploaded PNG in R2, is untouched. `whoMarker` now resolves image, then Google avatar,
+then the name initial with its generated per-person colour, so every account still renders
+something without an image. `author_icon` is gone from the public feed, the settings API no
+longer recognises `icon` (an emoji-only request is rejected as "変更がありません"), and the
+emoji field is removed from both sign-up and the profile form.
+
+Regression: the migration check asserts `users.icon` is absent and `icon_version` remains;
+an API test asserts the settings rejection, that bootstrap exposes no emoji, that the
+public feed carries `author_avatar` and `author_icon_url` but no `author_icon`, and that
+selecting the dropped column now fails.

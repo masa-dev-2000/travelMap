@@ -66,7 +66,7 @@ export const travelling = (owner: string) => `(EXISTS (SELECT 1 FROM user_settin
 
 export interface PublicFeedEntry {
   id:string; date:string; at:string|null; author:string; author_name:string;
-  author_icon:string|null; author_avatar:string|null; author_icon_url:string|null;
+  author_avatar:string|null; author_icon_url:string|null;
   place_name:string|null; memo:string; latitude:number|null; longitude:number|null;
   category_name:string|null; trip_name:string|null; publication_seq?:number; unread?:number;
   photos?:unknown[]; [key:string]:unknown;
@@ -75,7 +75,7 @@ export interface PublicFeedEntry {
 export async function loadPublicEntries(env:Env, handle:string|null, now:string, viewerId?:string):Promise<PublicFeedEntry[]> {
     const entries = await query(env.DB, `SELECT p.id,p.date,${viewerId ? 'q.seq publication_seq,CASE WHEN q.seq>COALESCE(rc.last_seen_seq,0) THEN 1 ELSE 0 END unread,' : ''}CASE WHEN p.publish_at IS NULL AND date(a.occurred_at,'+9 hours')=p.date THEN a.occurred_at END at,CASE p.precision WHEN 'hidden' THEN NULL ELSE p.place_name END place_name,p.memo,
       CASE p.precision WHEN 'exact' THEN l.latitude END latitude,CASE p.precision WHEN 'exact' THEN l.longitude END longitude,
-      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.icon author_icon,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,u.status author_status,u.status_at author_status_at,
+      tr.name trip_name,c.name category_name,u.handle author,u.display_name author_name,u.avatar_url author_avatar,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END author_icon_url,u.status author_status,u.status_at author_status_at,
       (SELECT SUM(CASE t.kind WHEN 'expense' THEN t.amount_jpy WHEN 'refund' THEN -t.amount_jpy END) FROM transactions t WHERE t.activity_id=p.activity_id) spent_jpy
       FROM public_entries p LEFT JOIN public_entry_locations l ON l.entry_id=p.id JOIN activities a ON a.id=p.activity_id JOIN users u ON u.id=p.user_id
       JOIN categories c ON c.id=a.category_id LEFT JOIN trips tr ON tr.id=a.trip_id
@@ -154,12 +154,6 @@ async function settingsWrites(db: D1Database, uid: string, body: Input): Promise
     writes.push(query(db,'UPDATE users SET status=?,status_at=? WHERE id=?',[status || null,status ? new Date().toISOString() : null,uid]));
   }
   if (body.bio !== undefined) writes.push(query(db,'UPDATE users SET bio=? WHERE id=?',[text(body.bio,'ひとこと',300,false),uid]));
-  if (body.icon !== undefined) {
-    if (body.icon !== null && typeof body.icon !== 'string') throw new InputError('アイコンが不正です');
-    const icon=(body.icon ?? '').trim();
-    if ([...icon].length>8 || [...new Intl.Segmenter('ja',{granularity:'grapheme'}).segment(icon)].length>2 || /[<>&"']/.test(icon)) throw new InputError('アイコンは絵文字1〜2文字です');
-    writes.push(query(db,'UPDATE users SET icon=? WHERE id=?',[icon || null,uid]));
-  }
   if (body.tip_url !== undefined) {
     const tip=optionalText(body.tip_url,'投げ銭リンク',500);
     if (tip && !/^https:\/\/[^\s]+$/.test(tip)) throw new InputError('投げ銭リンクは https:// で始まるURLです');
@@ -219,7 +213,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
       // Who looked at my records lately: one line per person (latest visit), 14 days, 10 people. No counts.
       const since=new Date(Date.now()-14*86400000).toISOString();
       const [rows, seen] = await Promise.all([
-        query(db,`SELECT u.handle,u.display_name,u.icon,u.avatar_url,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END icon_url,MAX(f.created_at) at
+        query(db,`SELECT u.handle,u.display_name,u.avatar_url,CASE WHEN u.icon_version IS NULL THEN NULL ELSE '/api/public/icons/'||u.handle||'?v='||u.icon_version END icon_url,MAX(f.created_at) at
           FROM footprints f JOIN users u ON u.id=f.viewer_id WHERE f.owner_id=? AND f.created_at>=? GROUP BY f.viewer_id ORDER BY at DESC LIMIT 10`,[uid,since]).all<{at:string}>(),
         query(db,"SELECT value FROM user_settings WHERE user_id=? AND key='footprints_seen_at'",[uid]).first<{value:string}>(),
       ]);
@@ -374,7 +368,7 @@ export async function privateApi(request: Request, env: Env, user: User): Promis
     // Sign-up: accept the terms and save the first profile and visibility choices in one step.
     if (path === '/api/private/signup') {
       if (body.accept !== true) throw new InputError('利用規約への同意が必要です');
-      const allowed=['display_name','handle','icon','map_visible','publish_default','publish_precision'];
+      const allowed=['display_name','handle','map_visible','publish_default','publish_precision'];
       const writes=await settingsWrites(db,uid,Object.fromEntries(Object.entries(body).filter(([key]) => allowed.includes(key))));
       const now=new Date().toISOString();
       await db.batch([...writes,query(db,'UPDATE users SET terms_accepted_at=COALESCE(terms_accepted_at,?),onboarded_at=COALESCE(onboarded_at,?) WHERE id=?',[now,now,uid])]);

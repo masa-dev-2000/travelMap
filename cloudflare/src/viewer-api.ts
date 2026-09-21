@@ -36,7 +36,7 @@ export async function viewerApi(request:Request,env:Env,user:User):Promise<Respo
     }
     if(request.method==='GET'&&path==='/api/private/mutes'){
       // Do not turn settings into a directory of non-public registrations.
-      const rows=await query(db,`SELECT u.handle,u.display_name,u.icon,u.avatar_url,
+      const rows=await query(db,`SELECT u.handle,u.display_name,u.avatar_url,
         CASE WHEN m.muted_user_id IS NULL THEN 0 ELSE 1 END muted
         FROM users u LEFT JOIN user_mutes m ON m.muted_user_id=u.id AND m.viewer_user_id=?
         WHERE u.id<>? AND u.terms_accepted_at IS NOT NULL AND (m.muted_user_id IS NOT NULL OR

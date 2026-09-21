@@ -53,7 +53,7 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
     if(['selection','period','mute','identity','error'].includes(reason))cards.hide();
     groups=visibleGroups(s);markers.forEach(m=>m.remove());markers=[];
     if(!replaying)for(const g of groups){if(!g.last)continue;const button=el('button',{type:'button',className:'who-button friend-marker'});button.dataset.handle=g.user.handle;button.setAttribute('aria-label',g.user.display_name+'の記録');
-      button.append(whoMarker({image:g.user.icon_url,icon:g.user.icon,avatar:g.user.avatar_url,name:g.user.display_name,caption:g.user.display_name,color:color(g.user.handle)}));
+      button.append(whoMarker({image:g.user.icon_url,avatar:g.user.avatar_url,name:g.user.display_name,caption:g.user.display_name,color:color(g.user.handle)}));
       button.onclick=event=>{event.stopPropagation();state.select(g.user.handle);showEntry(g.last);};
       const node=el('div',{className:'who-pin'});node.append(button);markers.push(new gl.Marker({element:node}).setLngLat([g.last.longitude,g.last.latitude]).addTo(map));
     }
@@ -89,7 +89,7 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
     result.push(option('すべての公開記録',rows,''));return result;
   }
   function groupData({user,rows}){
-    return {title:user.display_name+'の記録',author:user.handle,source:'public',steps:rows.map(publicStep),face:{image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name},color:color(user.handle)};
+    return {title:user.display_name+'の記録',author:user.handle,source:'public',steps:rows.map(publicStep),face:{image:user.icon_url,avatar:user.avatar_url,name:user.display_name},color:color(user.handle)};
   }
   map.on('basemapchanging',()=>{styleReady=false;});map.on('style.load',()=>{styleReady=true;draw();});
   render(state.state(),'init');const ready=reload();

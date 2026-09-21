@@ -4,14 +4,14 @@ import { InputError } from './validation.ts';
 import { viewerApi } from './viewer-api.ts';
 import { locationApi } from './location-api.ts';
 
-const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_name: 'ローカル', handle: 'local', avatar_url: null, icon: null, bio: '', tip_url: null};
+const LOCAL_USER: User = {id: 'local-owner', email: 'local@localhost', display_name: 'ローカル', handle: 'local', avatar_url: null, bio: '', tip_url: null};
 
 // Local development has no Google login; the local entry point vouches for a fixed account.
 async function localUser(env: Env): Promise<User> {
   const now=new Date().toISOString();
   await env.DB.prepare('INSERT OR IGNORE INTO users(id,google_sub,email,display_name,handle,avatar_url,created_at,terms_accepted_at,onboarded_at) VALUES(?,?,?,?,?,?,?,?,?)')
     .bind(LOCAL_USER.id, null, LOCAL_USER.email, LOCAL_USER.display_name, LOCAL_USER.handle, null, now, now, now).run();
-  const row=await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
+  const row=await env.DB.prepare('SELECT id,email,display_name,handle,avatar_url,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE id=?').bind(LOCAL_USER.id).first<User>() ?? LOCAL_USER;
   return {...row,terms_accepted_at:row.terms_accepted_at ?? now};// the fixed local account always counts as signed up
 }
 
@@ -21,7 +21,7 @@ export async function handle(request: Request, env: Env, localOwner = false): Pr
     if (url.pathname === '/api/public/session' && request.method === 'GET') {
       // Login state for the single map page. Only public profile fields; private data stays behind /api/private/*.
       const state:AuthState=localOwner?{authenticated:true,dataAvailable:true,identity:null,user:await localUser(env)}:await authentication(request,env),who=state.user;
-      const response=secure(json({authenticated:state.authenticated,data_available:state.dataAvailable,needs_signup:!!who&&!who.terms_accepted_at,user:who?{handle:who.handle,display_name:who.display_name,icon:who.icon,avatar_url:who.avatar_url,icon_url:who.icon_version==null?null:`/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status??null,author_status_at:who.status_at??null}:null}));
+      const response=secure(json({authenticated:state.authenticated,data_available:state.dataAvailable,needs_signup:!!who&&!who.terms_accepted_at,user:who?{handle:who.handle,display_name:who.display_name,avatar_url:who.avatar_url,icon_url:who.icon_version==null?null:`/api/public/icons/${who.handle}?v=${who.icon_version}`,author_status:who.status??null,author_status_at:who.status_at??null}:null}));
       if(state.migrateCookie)response.headers.append('Set-Cookie',state.migrateCookie);return response;
     }
     if (url.pathname.startsWith('/api/public/')) {

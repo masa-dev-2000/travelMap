@@ -8,7 +8,7 @@ export function makeStoriesStrip(stage,{state}) {
       const selected=s.selectedUser===user.handle;
       const button=el('button',{type:'button',className:'story-person'+(user.has_unread?' unread':'')+(selected?' selected':'')});
       button.dataset.handle=user.handle;button.setAttribute('aria-pressed',String(selected));button.setAttribute('aria-label',user.display_name+(user.has_unread?' 未読あり':' 既読'));
-      button.append(whoMarker({image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name,caption:user.display_name}));
+      button.append(whoMarker({image:user.icon_url,avatar:user.avatar_url,name:user.display_name,caption:user.display_name}));
       button.onclick=()=>state.select(state.state().selectedUser===user.handle?null:user.handle);root.append(button);
     }
     root.hidden=!s.users.length;root.scrollLeft=scroll;

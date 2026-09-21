@@ -8,7 +8,7 @@ anchor='-- Private foreground GPS samples; independent from activities and publi
 assert extra.count(anchor)==1, 'Initial schema boundary must be explicit'
 old=extra.split(anchor)[0]
 files=sorted(p for p in (root/'cloudflare/migrations').glob('[0-9][0-9][0-9][0-9]-*.sql') if not p.name.endswith('.local.sql') and int(p.name.split('-')[0])>=11)
-assert [p.name.split('-')[0] for p in files]==['0011','0012','0013','0014','0015','0016']
+assert [p.name.split('-')[0] for p in files]==['0011','0012','0013','0014','0015','0016','0017']
 upgrade=sqlite3.connect(':memory:');fresh=sqlite3.connect(':memory:')
 for db in [upgrade,fresh]:db.execute('PRAGMA foreign_keys=ON')
 upgrade.executescript(base+old)
@@ -48,6 +48,8 @@ upgrade.execute("INSERT INTO activities(id,occurred_at,timezone,timezone_basis,c
 upgrade.execute("INSERT INTO public_entries(id,activity_id,date,memo,status,user_id) VALUES('e-later','later','2025-05-01','','published','kept')")
 upgrade.execute("INSERT INTO public_entry_sequence(entry_id,author_user_id) VALUES('e-later','kept')")
 assert upgrade.execute("SELECT seq FROM public_entry_sequence WHERE entry_id='e-later'").fetchone()[0]>4, 'entries published later must keep taking higher numbers, not slot into their date'
-print('PASS: existing DB + 0011..0016 == fresh; users/GPS kept; foreign keys valid')
+assert 'icon' not in {r[1] for r in upgrade.execute('PRAGMA table_info(users)')}, '0017 must drop the emoji column'
+assert 'icon_version' in {r[1] for r in upgrade.execute('PRAGMA table_info(users)')}, 'the uploaded-image column must stay'
+print('PASS: existing DB + 0011..0017 == fresh; users/GPS kept; foreign keys valid')
 print('PASS: 0016 renumbers imported history into date order and keeps AUTOINCREMENT ahead')
-print('0012/0015/0016 are apply-once changes. Production migration ledger remains a separate check.')
+print('0012/0015/0016/0017 are apply-once changes. Production migration ledger remains a separate check.')
