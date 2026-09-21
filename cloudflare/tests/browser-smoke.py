@@ -299,4 +299,39 @@ class BrowserTests(unittest.TestCase):
         p.wait_for_timeout(400)
         self.assertEqual(len(feed_calls),after_load+2,'a stale feed must be re-read on return')
 
+    def test_quick_add_form_locates_on_open_without_a_button_press(self):
+        # The record screen already located automatically; the map's quick add form did not,
+        # so a missed button press saved a record with no coordinates.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("!!document.querySelector('#activity-form [name=latitude]')")
+        self.assertEqual(p.input_value('#activity-form [name=latitude]'),'','closed form must not measure')
+        p.evaluate("__tm.shell.open('add')")
+        p.wait_for_function("document.querySelector('#activity-form [name=latitude]').value!==''")
+        p.evaluate("document.querySelector('#add-forms details').open=true")
+        self.assertEqual(p.input_value('#activity-form [name=latitude]'),'35')
+        self.assertEqual(p.input_value('#activity-form [name=longitude]'),'134')
+        expect(p.locator('#locate-state')).to_contain_text('位置 ±')
+        # A hand-typed coordinate must survive; GPS must not overwrite it.
+        p.fill('#activity-form [name=latitude]','12.5')
+        expect(p.locator('#locate-state')).to_contain_text('手で入れた位置')
+        p.evaluate("navigator.geolocation.watchPosition&&document.dispatchEvent(new Event('visibilitychange'))")
+        p.wait_for_timeout(200)
+        self.assertEqual(p.input_value('#activity-form [name=latitude]'),'12.5')
+        # Pressing the button explicitly hands control back to GPS.
+        p.click('#locate')
+        p.wait_for_function("document.querySelector('#activity-form [name=latitude]').value==='35'")
+        self.assertEqual(p.input_value('#activity-form [name=latitude]'),'35')
+
+    def test_quick_add_form_reports_a_failed_fix_and_stops_when_closed(self):
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.evaluate("window.__gpsMode='denied'")
+        p.evaluate("__tm.shell.open('add')")
+        expect(p.locator('#locate-state')).to_contain_text('位置を取得できません')
+        self.assertEqual(p.input_value('#activity-form [name=latitude]'),'','a failed fix must not invent coordinates')
+        p.evaluate("window.__gpsMode='ok';window.__gpsEvents.length=0;__tm.shell.hide()")
+        p.wait_for_timeout(300)
+        self.assertEqual(p.evaluate('window.__gpsEvents.length'),0,'a closed form must not keep measuring')
+
 if __name__=='__main__':unittest.main(verbosity=2)
