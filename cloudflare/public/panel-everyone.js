@@ -9,7 +9,7 @@ const LABELS={7:'1週間',30:'1か月',90:'3か月',all:'全期間',custom:'期�
 const located=e=>Number.isFinite(e.latitude)&&Number.isFinite(e.longitude);
 export const publicStep=e=>({id:e.id,publicEntryId:e.id,publication_seq:e.publication_seq,author:e.author,source:'public',date:e.date,at:e.at,place:e.place_name,category:e.category_name,memo:e.memo,spent:e.spent_jpy,photos:e.photos||[],lng:e.longitude,lat:e.latitude});
 export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{},onOpenPerson=()=>{},onPlay=()=>{},onRead=()=>{},notify=()=>{}}){
-  let failed=false,loaded=false,loading=0,request=null,replaying=false,styleReady=false,markers=[],groups=[];
+  let failed=false,loaded=false,loadedAt=0,loading=0,request=null,replaying=false,styleReady=false,markers=[],groups=[];
   const cards=mapRecordCard(map,shell),anonymousOrder=new Map();let nextAnonSeq=0;
   const chip=el('select',{className:'period-chip'});chip.setAttribute('aria-label','表示する期間');
   for(const [value,label] of Object.entries(LABELS))chip.append(new Option(label,value));shell.heading.append(chip);
@@ -68,7 +68,10 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
     chip.value=s.period.preset;shell.view('period',form,'表示する期間');
   };
   function cancelReload(){loading++;request?.abort();request=null;}
-  async function reload({signal}={}){
+  // maxAge lets a caller accept the feed it already has. Only passive refreshes use it;
+  // an explicit action (save, mute, play) omits it and always re-reads.
+  async function reload({signal,maxAge}={}){
+    if(maxAge!=null&&loaded&&!failed&&Date.now()-loadedAt<maxAge)return true;
     const run=++loading;request?.abort();request=new AbortController();const controller=request,cancel=()=>controller.abort();signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)controller.abort();
     try{
       const response=await fetch(authenticated?'/api/private/viewer-feed':'/api/public/entries',{signal:controller.signal,cache:'no-store'});
@@ -78,7 +81,7 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
         for(const e of data.entries.slice().reverse())if(!anonymousOrder.has(e.id))anonymousOrder.set(e.id,++nextAnonSeq);
         data.entries=data.entries.map(e=>({...e,publication_seq:anonymousOrder.get(e.id),unread:true}));data.muted=[];data.self=null;
       }
-      failed=false;loaded=true;state.replaceFeed(data);return true;
+      failed=false;loaded=true;loadedAt=Date.now();state.replaceFeed(data);return true;
     }catch(e){if(run===loading&&e.name!=='AbortError'){failed=true;state.fail(e.message);notify(e.message);}return false;}
     finally{signal?.removeEventListener('abort',cancel);}
   }

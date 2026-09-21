@@ -274,4 +274,29 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(len(feed_calls),2,'Private startup must not replace the pending Play feed')
         self.api(feeds.pop());p.wait_for_function('__tm.player.active()')
         self.assertEqual(p.evaluate('__tm.player.state().author'),'friend')
+    def test_tab_return_reuses_a_recent_feed_but_actions_still_refresh(self):
+        # Returning to the tab used to re-read the whole feed every time, which was the
+        # largest share of D1 reads in normal use.
+        p=self.page;feed_calls=[]
+        def count(route):
+            if urlparse(route.request.url).path in ('/api/private/viewer-feed','/api/public/entries'):
+                feed_calls.append(route.request.url)
+            self.api(route)
+        p.route('**/api/**',count);p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function('__tm.everyone.count()>0')
+        after_load=len(feed_calls)
+        self.assertGreater(after_load,0,'the first load must read the feed')
+        for _ in range(3):
+            p.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+            p.wait_for_timeout(250)
+        self.assertEqual(len(feed_calls),after_load,'a recent feed must be reused on tab return')
+        # An explicit action must still re-read, and so must a return once the feed is stale.
+        p.evaluate('void __tm.everyone.reload()')
+        p.wait_for_timeout(400)
+        self.assertEqual(len(feed_calls),after_load+1,'an explicit reload must always re-read')
+        p.evaluate("void __tm.everyone.reload({maxAge:0})")
+        p.wait_for_timeout(400)
+        self.assertEqual(len(feed_calls),after_load+2,'a stale feed must be re-read on return')
+
 if __name__=='__main__':unittest.main(verbosity=2)

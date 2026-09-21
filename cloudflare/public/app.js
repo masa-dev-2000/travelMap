@@ -96,5 +96,8 @@ if(shared.get('play')){
   }else if(options.length)void playback.openOptions('旅を再生',options,{publicEntries:true});else notify('この人の公開記録はないか、ミュート中です');
 }
 // A return to the visible tab refreshes metadata, but never auto-resumes playback.
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)void everyone.reload();});
+// Re-reading the whole feed on every return is the largest share of D1 reads in normal
+// use, so a feed this recent is accepted as-is. Saves, mute and play still re-read.
+const TAB_RETURN_MAX_AGE_MS=60000;
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void everyone.reload({maxAge:TAB_RETURN_MAX_AGE_MS});});
 document.addEventListener('tm:auth-lost',()=>{authEpoch++;playback.stop();viewerState.clear();route.clear();route.setSamples([]);$('#activities')?.replaceChildren();});
