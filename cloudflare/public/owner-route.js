@@ -81,7 +81,7 @@ export function makeOwnerRoute(map,shell){
     if(rows.length)for(const [r,label,idx] of [[rows[0],'始点',0],[rows.at(-1),'最新',rows.length-2]]){
       if(rows.length===1&&label==='始点')continue;
       const latest=label==='最新',button=el('button',{type:'button',className:latest?'who-button':'vector-endpoint',textContent:latest?'':label});
-      if(latest)button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+shortDay(r),status:under(user,r),color:'#356f68'}));
+      if(latest)button.append(whoMarker({image:user?.icon_url,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最新 '+shortDay(r),status:under(user,r),color:'#356f68'}));
       button.setAttribute('aria-label',label+' '+new Date(r.occurred_at).toLocaleString('ja-JP'));button.onclick=event=>{event.stopPropagation();if(!replaying)showRecord(r);};
       // 最新マーカーは素の外側要素(.who-pin)を MapLibre に渡す。ボタンの all:unset が .maplibregl-marker の position:absolute を消して位置がずれるため
       const pinEl=latest?el('div',{className:'who-pin'}):button;if(latest)pinEl.append(button);
@@ -90,7 +90,7 @@ export function makeOwnerRoute(map,shell){
     // 期間内に記録が無いとき: 線は出さず、最後の地点に薄いマーカーだけ置く
     if(!rows.length&&ghost&&!replaying){
       const r=ghost,button=el('button',{type:'button',className:'who-button'}),pinEl=el('div',{className:'who-pin stale'});
-      button.append(whoMarker({image:user?.icon_url,icon:user?.icon,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最後 '+shortDay(r),status:under(user,r),color:'#356f68'}));
+      button.append(whoMarker({image:user?.icon_url,avatar:user?.avatar_url,name:user?.display_name||'最新',caption:'最後 '+shortDay(r),status:under(user,r),color:'#356f68'}));
       button.setAttribute('aria-label','最後の記録 '+new Date(r.occurred_at).toLocaleString('ja-JP'));
       button.onclick=event=>{event.stopPropagation();if(!replaying)showRecord(r,'この期間の記録はありません。最後の記録を表示しています');};
       pinEl.append(button);endpoints.push(new gl.Marker({element:pinEl,anchor:'center'}).setLngLat(point(r)).addTo(map));

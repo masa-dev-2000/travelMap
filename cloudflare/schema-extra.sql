@@ -44,7 +44,7 @@ CREATE INDEX IF NOT EXISTS transactions_user ON transactions(user_id,occurred_at
 CREATE INDEX IF NOT EXISTS public_entries_user ON public_entries(user_id,status);
 ALTER TABLE users ADD COLUMN bio TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN tip_url TEXT;
--- Map marker icon chosen by the user (emoji). NULL falls back to the Google avatar, then the initial.
+-- Map marker emoji, kept only so the later drop has something to remove.
 ALTER TABLE users ADD COLUMN icon TEXT;
 -- Uploaded map marker image lives in R2 at icons/<user_id>.png. NULL = no image; the value changes on every upload and busts caches.
 ALTER TABLE users ADD COLUMN icon_version INTEGER;
@@ -142,3 +142,6 @@ CREATE TABLE public_read_cursors (
 -- Unknown old date cursors restart conservatively, rather than hiding unseen entries.
 INSERT INTO public_read_cursors(viewer_user_id,author_user_id,last_seen_seq,last_seen_entry_id,updated_at)
  SELECT viewer_user_id,author_user_id,0,last_seen_entry_id,updated_at FROM public_read_cursors_legacy;
+-- The emoji marker column is dropped again: the fallback chain is the uploaded image,
+-- then the Google avatar, then the name initial.
+ALTER TABLE users DROP COLUMN icon;

@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { sha256 } from './validation.ts';
 
-export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null; terms_accepted_at?: string | null};
+export type User = {id: string; email: string; display_name: string; handle: string; avatar_url: string | null; icon_version?: number | null; bio: string; tip_url: string | null; status?: string | null; status_at?: string | null; terms_accepted_at?: string | null};
 // Only the map page (exactly "/"), the sign-up page and same-origin paths under /admin may be used as a post-login destination.
 export const safeNext = (value: string | null) => value && (value === '/' || value === '/signup/' || /^\/admin(\/[A-Za-z0-9_\-./?=&%]*)?$/.test(value)) ? value : '/';
 export type AuthIdentity = {sub:string; email:string; name?:string; picture?:string};
@@ -69,7 +69,7 @@ export async function verifyAccessToken(token: string, env: Pick<Env, 'ACCESS_IS
 }
 
 export async function userById(db: D1Database, id: string): Promise<User | null> {
-  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE id=?', [id]).first<User>();
+  return await query(db, 'SELECT id,email,display_name,handle,avatar_url,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE id=?', [id]).first<User>();
 }
 
 // Resolves the signed-in user from the session cookie, or from a legacy Access assertion for the owner.
@@ -82,12 +82,12 @@ export async function authentication(request:Request,env:AuthEnv):Promise<AuthSt
   const jar=cookies(request), encrypted=jar[SESSION_COOKIE];
   if(encrypted){
     const identity=await decryptIdentity(encrypted,env.SESSION_ENCRYPTION_KEY);
-    if(identity){try{return {authenticated:true,dataAvailable:true,identity,user:await query(env.DB,'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE google_sub=?',[identity.sub]).first<User>()};}
+    if(identity){try{return {authenticated:true,dataAvailable:true,identity,user:await query(env.DB,'SELECT id,email,display_name,handle,avatar_url,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE google_sub=?',[identity.sub]).first<User>()};}
       catch{return {authenticated:true,dataAvailable:false,identity,user:null};}}
   }
   const raw = jar[LEGACY_SESSION_COOKIE];
   if (raw && /^[a-f0-9]{64}$/.test(raw)) {
-    try { const row=await query(env.DB,'SELECT u.id,u.google_sub,u.email,u.display_name,u.handle,u.avatar_url,u.icon,u.icon_version,u.bio,u.tip_url,u.status,u.status_at,u.terms_accepted_at,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?',[await sha256(new TextEncoder().encode(raw))]).first<User&{google_sub:string|null;expires_at:string}>();
+    try { const row=await query(env.DB,'SELECT u.id,u.google_sub,u.email,u.display_name,u.handle,u.avatar_url,u.icon_version,u.bio,u.tip_url,u.status,u.status_at,u.terms_accepted_at,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id_hash=?',[await sha256(new TextEncoder().encode(raw))]).first<User&{google_sub:string|null;expires_at:string}>();
       if(row&&row.expires_at>new Date().toISOString()){
         if(row.google_sub){const identity={sub:row.google_sub,email:row.email,name:row.display_name,picture:row.avatar_url??undefined};return {authenticated:true,dataAvailable:true,identity,user:row,migrateCookie:await identityCookie(identity,env,new URL(request.url))};}
         return {authenticated:true,dataAvailable:true,identity:null,user:row};
@@ -96,7 +96,7 @@ export async function authentication(request:Request,env:AuthEnv):Promise<AuthSt
   }
   const assertion = request.headers.get('Cf-Access-Jwt-Assertion');
   if (assertion && await verifyAccessToken(assertion, env)) {
-    try { const user=await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();return {authenticated:!!user,dataAvailable:true,identity:null,user}; }
+    try { const user=await query(env.DB, 'SELECT id,email,display_name,handle,avatar_url,icon_version,bio,tip_url,status,status_at,terms_accepted_at FROM users WHERE lower(email)=lower(?)', [env.OWNER_EMAIL]).first<User>();return {authenticated:!!user,dataAvailable:true,identity:null,user}; }
     catch{return {authenticated:true,dataAvailable:false,identity:null,user:null};}
   }
   return {authenticated:false,dataAvailable:true,identity:null,user:null};

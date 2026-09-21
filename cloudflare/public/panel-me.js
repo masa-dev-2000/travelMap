@@ -13,7 +13,7 @@ async function bootstrap(){
   const data=await api('bootstrap');categories=data.categories;trips=data.trips;$('#publish-default').checked=data.settings?.publish_default===true;
   $('#publish-precision').value=data.settings?.publish_precision??'exact';$('#publish-delay').value=String(data.settings?.publish_delay_hours??0);
   if(data.user){$('#me-name').textContent=data.user.display_name;$('#me-handle').textContent='@'+data.user.handle+' · '+data.user.email;if(data.user.avatar_url){$('#me-avatar').src=data.user.avatar_url;$('#me-avatar').hidden=false;}
-    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';pf.elements.icon.value=data.user.icon||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);$('#status-form').elements.status.value=data.user.status||'';everyone.setSelf(data.user.handle);paintFace(data.user);$('#profile-bio').textContent=data.user.bio||'';pf.elements.tip_url.value=data.user.tip_url||'';}
+    const pf=$('#profile-form');pf.elements.display_name.value=data.user.display_name;pf.elements.handle.value=data.user.handle;pf.elements.bio.value=data.user.bio||'';$('#icon-preview').hidden=$('#icon-remove').hidden=!data.user.icon_url;if(data.user.icon_url)$('#icon-preview').src=data.user.icon_url;route.setUser(data.user);$('#status-form').elements.status.value=data.user.status||'';everyone.setSelf(data.user.handle);paintFace(data.user);$('#profile-bio').textContent=data.user.bio||'';pf.elements.tip_url.value=data.user.tip_url||'';}
   paintTravel(data.settings?.map_visible===true,data.settings?.map_visible_until);
 
   const filterValue=$('#trip-filter').value;fillSelect($('#trip-filter'),trips,'すべて');$('#trip-filter').value=filterValue;
@@ -157,7 +157,7 @@ async function iconRequest(method,body){const response=await fetch('/api/private
 // 正方形に中央クロップして256pxのPNGにする（canvas経由なのでEXIFは残らない）
 $('#icon-file').onchange=async event=>{const input=event.currentTarget,file=input.files[0];if(!file)return;try{const bitmap=await createImageBitmap(file,{imageOrientation:'from-image'}),side=Math.min(bitmap.width,bitmap.height),canvas=el('canvas',{width:256,height:256});canvas.getContext('2d').drawImage(bitmap,(bitmap.width-side)/2,(bitmap.height-side)/2,side,side,0,0,256,256);bitmap.close();const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));if(!blob||blob.size>512*1024)throw new Error('画像が大きすぎます');await iconRequest('POST',blob);await bootstrap();notify('アイコン画像を保存しました');}catch(error){notify(`アイコンを保存できません：${error.message}`);}finally{input.value='';}};
 $('#icon-remove').onclick=async()=>{try{await iconRequest('DELETE');await bootstrap();notify('アイコン画像を外しました');}catch(error){notify(error.message);}};
-$('#profile-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;try{const v=formValues(form);await api('settings',{display_name:v.display_name,handle:v.handle,bio:v.bio,icon:v.icon||'',tip_url:v.tip_url||null});await bootstrap();notify('プロフィールを保存しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
+$('#profile-form').onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;try{const v=formValues(form);await api('settings',{display_name:v.display_name,handle:v.handle,bio:v.bio,tip_url:v.tip_url||null});await bootstrap();notify('プロフィールを保存しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
 $('#logout').onclick=async()=>{try{const r=await fetch('/auth/logout',{method:'POST'});if(!r.ok&&r.status!==302)throw new Error('ログアウトできませんでした');location.href='/';}catch(error){notify(error.message);}};
 $('#refresh').onclick=()=>refresh().catch(error=>notify(error.message));
 $('#trip-filter').onchange=()=>refresh().catch(error=>notify(error.message));
@@ -219,7 +219,7 @@ function renderTrips(){
     const actions=el('div',{className:'card-actions'});
     if(playTrip&&trip.entries){const play=el('button',{type:'button',className:'primary',textContent:'▶ 旅を再生'});play.onclick=()=>playTrip(trip.name,[{label:trip.name,load:async()=>{const rows=[];let offset=0;do{const data=await api('activities?'+new URLSearchParams({trip:trip.id,offset:String(offset)}));rows.push(...data.activities);offset=data.next_offset;}while(offset!==null);
       rows.sort((a,b)=>Date.parse(a.occurred_at)-Date.parse(b.occurred_at));// 自分の旅は私的データから(非公開の記録も含む)。共有URLは付けない
-      return {title:trip.name,source:'private',steps:rows.map(r=>({id:r.id,source:'private',rating:r.rating,date:jstDate(r),at:r.occurred_at,place:r.observed_place_name,category:r.category_name,memo:r.memo,spent:r.spent_jpy,photos:[],lng:r.longitude,lat:r.latitude})),face:{image:me.icon_url,icon:me.icon,avatar:me.avatar_url,name:me.display_name},color:'#216453'};}}]);actions.append(play);}
+      return {title:trip.name,source:'private',steps:rows.map(r=>({id:r.id,source:'private',rating:r.rating,date:jstDate(r),at:r.occurred_at,place:r.observed_place_name,category:r.category_name,memo:r.memo,spent:r.spent_jpy,photos:[],lng:r.longitude,lat:r.latitude})),face:{image:me.icon_url,avatar:me.avatar_url,name:me.display_name},color:'#216453'};}}]);actions.append(play);}
     const show=el('button',{type:'button',textContent:'この旅の記録だけ表示'});show.onclick=()=>{$('#trip-filter').value=trip.id;refresh().catch(error=>notify(error.message));};actions.append(show);card.append(actions);
     const form=el('form',{className:'row'}),name=el('input',{value:trip.name,maxLength:200,required:true}),save=el('button',{textContent:'名前を変更'});name.setAttribute('aria-label','旅の名前');form.append(name,save);
     form.onsubmit=async event=>{event.preventDefault();save.disabled=true;try{await api(`trips/${trip.id}`,{name:name.value.trim()});await bootstrap();everyone.reload();notify('旅の名前を変更しました');}catch(error){notify(error.message);}finally{save.disabled=false;}};card.append(form);
@@ -240,14 +240,14 @@ function drawOwn(){
 }
 // Profile identity belongs to the Profile rail item, never an extra settings button.
 const face=shell.button('profile').querySelector('.rail-icon');
-function paintFace(user){face.replaceChildren(whoMarker({image:user.icon_url,icon:user.icon,avatar:user.avatar_url,name:user.display_name,color:'#356f68'}));}
+function paintFace(user){face.replaceChildren(whoMarker({image:user.icon_url,avatar:user.avatar_url,name:user.display_name,color:'#356f68'}));}
 paintFace(me);
 // 足あと: 最近見てくれた人(数字は出さない)。未読があればレールの「じぶん」に点を付け、パネルを開いたら既読にする
 const ago=at=>{const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(at))/60000));return minutes<2?'たった今':minutes<60?minutes+'分前':minutes<1440?Math.floor(minutes/60)+'時間前':Math.floor(minutes/1440)+'日前';};
 async function footprints(){
   try{const data=await api('footprints'),box=$('#footprints');box.replaceChildren();shell.button('profile').classList.toggle('rail-dot',data.unread);
     if(!data.visitors.length)return;box.append(el('h2',{textContent:'最近見てくれた人'}));const row=el('div',{className:'visitors'});
-    for(const v of data.visitors){const item=el('div',{className:'visitor'});item.append(whoMarker({image:v.icon_url,icon:v.icon,avatar:v.avatar_url,name:v.display_name,color:'#356f68'}),el('strong',{textContent:v.display_name}),el('span',{textContent:ago(v.at)}));row.append(item);}
+    for(const v of data.visitors){const item=el('div',{className:'visitor'});item.append(whoMarker({image:v.icon_url,avatar:v.avatar_url,name:v.display_name,color:'#356f68'}),el('strong',{textContent:v.display_name}),el('span',{textContent:ago(v.at)}));row.append(item);}
     box.append(row);}catch{}
 }
 shell.drawer.addEventListener('viewchange',async event=>{if(event.detail==='profile'&&shell.button('profile').classList.contains('rail-dot')){try{await api('footprints/seen',{});shell.button('profile').classList.remove('rail-dot');}catch{}}});
