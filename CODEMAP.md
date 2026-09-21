@@ -81,7 +81,8 @@ CIは`.github/workflows/ui-location-checks.yml`。core/browserは独立したジ
 ## 現在の公開状態（2026-09-21）
 
 - Issues #9〜#13 は PR #14 で main にマージ済み。merge commit: `6f8c4b09ed8cf14da3b773ddf813a71d8582d8cf`。マージ直前 head `4bafc50ff1671644e2c66411a670ce34fa78b4f3` の CI run `35518255675` が core/browser とも成功。マージ結果のツリーは検証済み head と同一。
-- 本番D1へ0013→0014→0015を順番に一度ずつ適用し、Worker Version `d43a7e3b-cb07-408f-905e-d8f1cbbf8512` を100%配備済み。障害時の復旧先は旧Version `be322ae7-5354-41d3-82c9-91b672d513d1`。
+- 本番D1へ0013→0014→0015→0016→0017を順番に一度ずつ適用し、Worker Version `41d39685-e9ad-480f-a9f1-51a21ee8e75f`（配備元 `dc6a3ce`）を100%配備済み。障害時の復旧先は `d43a7e3b-cb07-408f-905e-d8f1cbbf8512`。
+- 地図アイコンの絵文字は0017で廃止。`users.icon` を削除し、公開フィードの `author_icon` も撤去。連鎖はアップロード画像→Googleの顔写真→表示名の頭文字。`icon_version`（R2のPNG）は維持。
 - `public_entry_sequence` は個人用feedの初回観測で353件（seq 1〜353・著者4人）を採番済み。外部キー違反0、既存データ（users 4・activities 353・transactions 267・public_entries 353・支出合計396,095円）を維持。
 - 本人の認証済みセッションで `/api/private/viewer-feed`・`/api/private/mutes` が200を返し、`publication_seq` と `unread` が機能することを本番で確認。公開フィードにミュート・既読・内部IDは含まれない。
 - 本番画面で旧常設UI（＋/−ズーム・みんな・全ルート・地図種類）が0件、ナビが「プロフィール／記録／設定」、右上が自動記録ON/OFF、地図種類とミュートが設定内にあることを確認。

@@ -181,3 +181,13 @@ node scripts/cloudflare.mjs deploy --dry-run
 本人用ページだけMapLibreへ移行し、公開ページはLeafletを継続。地図の色を薄くするフィルターはありません。外部通信の許可は本人用ページとMapLibre workerのOpenFreeMap接続に限定しています。依存資産は `node scripts/prepare-assets.mjs` で用意します。
 
 4種類の描画、3D建物、区間保持、選択の再読み込み、PC・390px幅の表示を確認。型チェックとAPI/CSPテスト8件成功。本番公開・実機タッチ・通信障害からの復帰は未検証です。
+
+## 絵文字アイコンの廃止（0017、2026-09-21）
+
+地図アイコンは「アップロード画像 → 絵文字 → Googleの顔写真 → 表示名の頭文字」の順で最初に在るものを使っていた。入力欄だけを消すと `users.icon` と公開APIの `author_icon` に絵文字が残り、画像を外した利用者が編集できない絵文字を表示することになるため、入口と保存先と出口を同時に閉じた。
+
+`0017-drop-user-emoji-icon.sql` を本番へ一度だけ適用し、`users.icon` を削除。適用前に絵文字を持っていたのはデモ3人で、いずれも画像を持つため表示は変化しない。`icon_version`（R2の `icons/<user_id>.png` を指す）は無変更で、画像保持4人・users 5件・activities 353件・public_entries 353件・`public_entry_sequence` 353件・外部キー違反0を維持。
+
+コード変更を含むため再配備した。Worker Version `41d39685-e9ad-480f-a9f1-51a21ee8e75f`、配備元は merge commit `dc6a3ce`。復旧先は `d43a7e3b-cb07-408f-905e-d8f1cbbf8512`。
+
+本番確認: 公開フィードから `author_icon` が消え `author_avatar` と `author_icon_url` は維持、プロフィール設定と新規登録から絵文字欄が消滅、画像アップロードと「画像を外す」は維持、`.who-face.emoji` の残存0。`whoMarker` の実挙動は 画像あり→画像 / 画像なしアバターあり→アバター / どちらも無し→頭文字（表示名が空なら `?`）。
