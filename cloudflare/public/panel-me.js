@@ -67,10 +67,10 @@ async function activities(reset=true){
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
-const locationEditor=makeLocationEditor({map,notify,panel:shell.drawer,collapse:shell.hide});
+const locationEditor=makeLocationEditor({map,notify,panel:shell.drawer,collapse:shell.hide,stage:shell.stage});
 
 // 位置の編集。数値入力は残し、地図で調整したい人だけがピンを掴む。
-function locationFields(item,field){
+function locationFields(item,field,submit){
   const lat=el('input',{type:'number',step:'any',value:item.latitude??''});
   const lng=el('input',{type:'number',step:'any',value:item.longitude??''});
   const origin=item.latitude!=null?{lat:item.latitude,lng:item.longitude}:null;
@@ -79,8 +79,11 @@ function locationFields(item,field){
   const state=el('span',{className:'hint'});
   function finish(){adjust.hidden=false;revert.hidden=true;state.textContent='';}
   adjust.onclick=()=>{
-    adjust.hidden=true;revert.hidden=false;state.textContent='ピンをドラッグ中。保存で確定します';
-    locationEditor.start({lat,lng,origin,onStop:finish});
+    adjust.hidden=true;revert.hidden=false;state.textContent='地図で調整中';
+    // 確定は地図側のバーから。パネルを閉じる画面でも押せる位置に置く。
+    locationEditor.start({lat,lng,origin,onStop:finish,
+      onConfirm:()=>submit(),
+      onCancel:()=>{lat.value=origin?String(origin.lat):'';lng.value=origin?String(origin.lng):'';}});
   };
   revert.onclick=()=>{
     lat.value=origin?String(origin.lat):'';lng.value=origin?String(origin.lng):'';
@@ -142,7 +145,8 @@ function editPanel(item){
   const detail=el('details'),title=el('summary',{textContent:'編集・削除'}),form=el('form',{className:'form-grid'});
   const field=(label,node)=>{const wrap=el('label',{textContent:label});wrap.append(node);return wrap;};
   const place=el('input',{value:item.observed_place_name||'',maxLength:200});
-  const f=editForm(item,field,place),where=locationFields(item,field);
+  const f=editForm(item,field,place);
+  const where=locationFields(item,field,()=>form.requestSubmit(save));
   const save=el('button',{textContent:'保存する',className:'primary'});
   if(item.public_status==='published')form.append(el('p',{className:'hint wide',textContent:'公開中の記録です。場所名・メモ・位置の変更は公開ページにも反映されます。'}));
   form.append(...f.head,...where.nodes,...f.tail,save);

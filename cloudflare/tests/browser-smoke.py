@@ -40,7 +40,7 @@ class BrowserTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.browser.close();cls.pw.stop();cls.server.shutdown();cls.server.server_close()
     def setUp(self):
-        self.posts=[];self.samples=[];self.commands=[];self.errors=[];self.leases={};self.held=[];self.upload_mode='ok';self.create_mode='ok';self.owner='test-owner'
+        self.posts=[];self.edits=[];self.samples=[];self.commands=[];self.errors=[];self.leases={};self.held=[];self.upload_mode='ok';self.create_mode='ok';self.owner='test-owner'
         self.muted={'muted'};self.read_cursors={'friend':1,'read':6};self.read_posts=[];self.authenticated=True;self.viewer_delay=0;self.viewer_failure=False
         today=time.strftime('%Y-%m-%d',time.gmtime())
         def pub(id,author,seq,date=today,lat=35.3,lng=134.3):
@@ -85,6 +85,8 @@ class BrowserTests(unittest.TestCase):
             else:
                 author=entry['author'];self.read_cursors[author]=max(entry['publication_seq'],self.read_cursors.get(author,0));data={'saved':True,'author':author,'last_seen_seq':self.read_cursors[author]}
         elif path=='/api/private/bootstrap':data={'user':user,'settings':{'map_visible':True,'publish_default':False},'categories':categories,'trips':[]}
+        elif re.fullmatch(r'/api/private/activities/[^/]+',path) and method=='POST':
+            self.edits.append({'path':path,'body':body});data={'saved':True}
         elif path=='/api/private/activities' and method=='POST':
             self.posts.append({'body':body,'key':route.request.headers.get('idempotency-key')});data={'id':'11111111-1111-4111-8111-111111111111'}
             if self.create_mode=='lost':self.create_mode='ok';route.abort('failed');return
@@ -372,10 +374,11 @@ class BrowserTests(unittest.TestCase):
         self.reopen_panel(1)
         self.record(1).get_by_role('button',name='地図で位置を調整').click()
         expect(p.locator('.edit-pin')).to_have_count(1)
-        self.reopen_panel(1)
-        # Closing that edit panel releases the pin.
+        expect(p.locator('.edit-bar')).to_have_count(1)
+        # Closing that edit panel releases the pin and its bar.
         p.evaluate("[...document.querySelectorAll('#activities > details')][1].querySelector('details').open=false")
         expect(p.locator('.edit-pin')).to_have_count(0)
+        expect(p.locator('.edit-bar')).to_have_count(0)
 
     def test_reverting_a_moved_position_restores_the_stored_one(self):
         p=self.page;p.goto(self.origin+'/')
@@ -384,11 +387,11 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(self.first_lat(),'35')
         self.record().get_by_role('button',name='地図で位置を調整').click()
         expect(p.locator('.edit-pin')).to_have_count(1)
-        self.reopen_panel()
-        p.fill('#activities [type=number][step=any]','10.5')
-        self.record().get_by_role('button',name='位置を元に戻す').click()
-        self.assertEqual(self.first_lat(),'35','revert must restore the stored position')
+        p.evaluate("document.querySelector('#activities [type=number][step=any]').value='10.5'")
+        p.get_by_role('button',name='やめる').click()
+        self.assertEqual(self.first_lat(),'35','cancelling must restore the stored position')
         expect(p.locator('.edit-pin')).to_have_count(0)
+        expect(p.locator('.edit-bar')).to_have_count(0)
 
     @unittest.skipUnless(REAL_MAP,'dragging needs the real MapLibre marker')
     def test_dragging_the_pin_updates_the_coordinate_fields(self):
@@ -404,5 +407,27 @@ class BrowserTests(unittest.TestCase):
         p.mouse.down();p.mouse.move(box['x']+140,box['y']+110,steps=10);p.mouse.up()
         p.wait_for_function("document.querySelector('#activities [type=number][step=any]').value!==%s"%json.dumps(before))
         self.assertNotEqual(self.first_lat(),before,'dragging must update the coordinate field')
+
+    def test_confirming_from_the_map_saves_without_reopening_the_panel(self):
+        # The save button lives in a panel that narrow screens close, so confirming
+        # has to be reachable from the map itself.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-bar')).to_be_visible()
+        self.assertEqual(p.evaluate("!!document.querySelector('.pane-open')"),False,
+                         'a narrow screen closes the panel, so the bar must carry the confirm')
+        p.evaluate("document.querySelector('#activities [type=number][step=any]').value='36.5'")
+        p.get_by_role('button',name='この位置で確定').click()
+        p.wait_for_function('window.__edits===undefined||true')
+        for _ in range(100):
+            if self.edits:break
+            p.wait_for_timeout(20)
+        self.assertTrue(self.edits,'confirming must save')
+        self.assertEqual(self.edits[-1]['path'],'/api/private/activities/a')
+        self.assertEqual(self.edits[-1]['body']['latitude'],36.5)
+        expect(p.locator('.edit-pin')).to_have_count(0)
+        expect(p.locator('.edit-bar')).to_have_count(0)
 
 if __name__=='__main__':unittest.main(verbosity=2)

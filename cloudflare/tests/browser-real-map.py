@@ -14,6 +14,7 @@ original_cases = [
     'BrowserTests.test_self_shared_url_stays_public_only','BrowserTests.test_play_during_profile_bootstrap',
     'BrowserTests.test_a_records_pin_is_grabbable_only_while_editing_that_record',
     'BrowserTests.test_dragging_the_pin_updates_the_coordinate_fields',
+    'BrowserTests.test_confirming_from_the_map_saves_without_reopening_the_panel',
 ]
 checks = [
     ('browser-smoke.py', original_cases, '1'),

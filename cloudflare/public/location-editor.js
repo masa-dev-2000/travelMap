@@ -16,36 +16,52 @@ function coveredBy(panel,map){
   return {edge:'left',size:Math.max(0,p.right-c.left),free:Math.max(0,c.right-p.right)};
 }
 
-export function makeLocationEditor({map,notify,panel,collapse}){
+// 確定はドラッグしている手元に置く。パネルの中だと、パネルを閉じた画面で押せない。
+function makeBar({onConfirm,onCancel}){
+  const bar=el('div',{className:'edit-bar'});
+  const label=el('span',{className:'edit-bar-label',textContent:'位置を調整中'});
+  const confirm=el('button',{type:'button',className:'primary',textContent:'この位置で確定'});
+  const cancel=el('button',{type:'button',textContent:'やめる'});
+  confirm.onclick=onConfirm;cancel.onclick=onCancel;
+  bar.append(label,confirm,cancel);
+  return {bar,say:text=>{label.textContent=text;}};
+}
+
+export function makeLocationEditor({map,notify,panel,collapse,stage}){
   let active=null;
   function stop(){
     if(!active)return;
     active.marker.remove();
+    active.bar.remove();
     active.onStop?.();
     active=null;
   }
   // 掴める地点は常にひとつ。別の記録を編集し始めたら前のつまみは消える。
-  function start({lat,lng,origin,onStop}){
+  function start({lat,lng,origin,onStop,onConfirm,onCancel}){
     stop();
     const from=origin??(lat.value!==''&&lng.value!==''
       ? {lng:Number(lng.value),lat:Number(lat.value)}
       : map.getCenter());
     const marker=new gl.Marker({element:el('div',{className:'edit-pin'}),draggable:true})
       .setLngLat([from.lng,from.lat]).addTo(map);
+    const {bar,say}=makeBar({
+      onConfirm:()=>{const saving=onConfirm?.();stop();return saving;},
+      onCancel:()=>{onCancel?.();stop();},
+    });
     marker.on('drag',()=>{
       const p=marker.getLngLat();
       lat.value=p.lat.toFixed(6);lng.value=p.lng.toFixed(6);
+      say(`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`);
     });
-    active={marker,onStop};
+    (stage??document.body).append(bar);
+    active={marker,bar,onStop};
     const covered=coveredBy(panel,map);
-    // 残る地図が狭すぎる画面ではパネルを閉じる。閉じてもピンは残り、開き直して保存する。
+    // 残る地図が狭すぎる画面ではパネルを閉じる。ピンと確定バーは地図に残る。
     const cramped=covered&&covered.free<MIN_GRAB_BAND;
     if(cramped)collapse?.();
     const padding=cramped||!covered?{}:{[covered.edge]:covered.size};
     map.easeTo({center:[from.lng,from.lat],zoom:Math.max(map.getZoom(),14),padding,duration:400});
-    notify?.(cramped
-      ? 'ピンをドラッグして位置を決め、記録を開き直して保存してください'
-      : '地図のピンをドラッグして位置を決めます。保存で確定します');
+    notify?.('ピンをドラッグして位置を決め、「この位置で確定」を押してください');
     return marker;
   }
   return {start,stop,editing:()=>!!active};
