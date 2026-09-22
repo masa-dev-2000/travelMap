@@ -5,6 +5,12 @@ import {gl} from '/owner-map.js';
 // 数値入力は残す。細かい調整と、地図を操作できない場合のため。
 
 const MIN_GRAB_BAND=260;// これ以下しか地図が見えないとピンを掴めない
+export const FOCUS_ZOOM=14;
+
+// 地点へ寄せる。今より引いた表示にはしない。
+export function focusPoint(map,lngLat,padding={}){
+  map.easeTo({center:lngLat,zoom:Math.max(map.getZoom(),FOCUS_ZOOM),padding,duration:400});
+}
 
 // 編集パネルは地図に重なる。そのまま中心へ寄せるとピンがパネルの下に入る。
 // PCは横に開くので左を、スマホは全幅のシートが下から出るので下を空ける。
@@ -33,6 +39,7 @@ export function makeLocationEditor({map,notify,panel,collapse,stage}){
     if(!active)return;
     active.marker.remove();
     active.bar.remove();
+    stage?.classList.remove('editing-location');
     active.onStop?.();
     active=null;
   }
@@ -53,6 +60,8 @@ export function makeLocationEditor({map,notify,panel,collapse,stage}){
       lat.value=p.lat.toFixed(6);lng.value=p.lng.toFixed(6);
       say(`${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`);
     });
+    // 確定バーは再生バーと同じ場所に出る。同時には使わないので、編集中は再生側を隠す。
+    stage?.classList.add('editing-location');
     (stage??document.body).append(bar);
     active={marker,bar,onStop};
     const covered=coveredBy(panel,map);
@@ -60,7 +69,7 @@ export function makeLocationEditor({map,notify,panel,collapse,stage}){
     const cramped=covered&&covered.free<MIN_GRAB_BAND;
     if(cramped)collapse?.();
     const padding=cramped||!covered?{}:{[covered.edge]:covered.size};
-    map.easeTo({center:[from.lng,from.lat],zoom:Math.max(map.getZoom(),14),padding,duration:400});
+    focusPoint(map,[from.lng,from.lat],padding);
     notify?.('ピンをドラッグして位置を決め、「この位置で確定」を押してください');
     return marker;
   }

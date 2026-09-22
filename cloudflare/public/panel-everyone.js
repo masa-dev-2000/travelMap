@@ -1,6 +1,7 @@
 import {el,ago,whoMarker} from './shared.js';
 import {gl} from './owner-map.js';
 import {publicPoint} from './record-display.js';
+import {focusPoint} from './location-editor.js';
 import {mapRecordCard} from './map-record-card.js';
 import {withinPeriod} from './viewer-state.js';
 export {ago};
@@ -39,6 +40,7 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
   }
   function showEntry(entry){
     const point=publicPoint(entry);if(!point){detail(entry);return;}
+    focusPoint(map,[point.lng,point.lat]);
     cards.show(point,{openDetail:()=>detail(entry),extra:{label:'この人の記録を再生',action:()=>{state.select(entry.author);onPlay(entry.author);}},onPresented:()=>{
       setTimeout(()=>{if(cards.visible(point.key))void Promise.resolve(onRead(publicStep(entry))).catch(e=>notify(e.message));},400);
     }});onOpenPerson(entry.author);
@@ -96,7 +98,7 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
   }
   map.on('basemapchanging',()=>{styleReady=false;});map.on('style.load',()=>{styleReady=true;draw();});
   render(state.state(),'init');const ready=reload();
-  return {ready,reload,cancelReload,groupData,storyOptions,detail,showEntry,available:()=>!failed,count:()=>state.state().users.length,shownCount:()=>groups.reduce((n,g)=>n+g.rows.length,0),filter,
+  return {ready,reload,cancelReload,groupData,storyOptions,detail,showEntry,mapZoom:()=>map.getZoom(),mapCentre:()=>{const c=map.getCenter();return [c.lng,c.lat];},available:()=>!failed,count:()=>state.state().users.length,shownCount:()=>groups.reduce((n,g)=>n+g.rows.length,0),filter,
     countText:(n,m)=>`${n}件 / 全${m}件`,setSelf:handle=>state.setSelf(handle),selectPerson:handle=>state.select(handle),
     points:()=>groups.flatMap(g=>(g.points.length?g.points:g.last?[g.last]:[]).map(e=>[e.longitude,e.latitude])),
     setReplay:value=>{replaying=value;if(value){markers.forEach(m=>m.remove());markers=[];}else render(state.state(),'replay-end');draw();},destroy(){request?.abort();subscription();markers.forEach(m=>m.remove());}};

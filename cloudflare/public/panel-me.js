@@ -1,5 +1,5 @@
 import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
-import {makeLocationEditor} from '/location-editor.js';
+import {makeLocationEditor,focusPoint} from '/location-editor.js';
 // ログイン中だけ読み込む: 自分の記録一覧・編集・公開設定、収支、旅と分類、記録フォーム、設定シート。私的データは /api/private/* からだけ取る
 export async function startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip}){
 const $=selector=>document.querySelector(selector);
@@ -57,7 +57,7 @@ async function activities(reset=true){
     const purposeLabel=el('label',{textContent:'用途'}),fileLabel=el('label',{textContent:'ファイル'});purposeLabel.append(purpose);fileLabel.append(file);attachmentForm.append(purposeLabel,fileLabel,el('button',{textContent:'非公開で添付'}));
     attachmentForm.onsubmit=async event=>{event.preventDefault();const button=attachmentForm.querySelector('button');button.disabled=true;try{const selected=file.files[0];if(!selected||selected.size>8*1024*1024)throw new Error('8MB以内のファイルを選択してください');const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:item.id,purpose:purpose.value}),{method:'POST',headers:{'Content-Type':selected.type},body:selected});const result=await response.json();if(!response.ok)throw new Error(result.error);file.value='';notify('非公開で添付しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
     detail.append(title,attachmentForm);card.append(detail);$('#activities').append(entry);
-    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('profile');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)map.easeTo({center:[item.longitude,item.latitude]});});}
+    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('profile');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)focusPoint(map,[item.longitude,item.latitude]);});}
   }
   if(reset&&data.activities.length===0)$('#activities').append(el('p',{textContent:'まだ記録がありません。'}));
   activityOffset=data.next_offset;$('#more-activities').hidden=true;

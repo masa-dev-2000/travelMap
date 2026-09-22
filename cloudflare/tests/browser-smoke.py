@@ -430,4 +430,47 @@ class BrowserTests(unittest.TestCase):
         expect(p.locator('.edit-pin')).to_have_count(0)
         expect(p.locator('.edit-bar')).to_have_count(0)
 
+    def test_the_confirm_bar_does_not_land_on_another_control(self):
+        # The bar shares a row with the playback control and sits above the bottom rail.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-bar')).to_be_visible()
+        expect(p.locator('.replay-control')).to_be_hidden()
+        overlap=p.evaluate("""()=>{
+          const bar=document.querySelector('.edit-bar').getBoundingClientRect();
+          const hit=[...document.querySelectorAll('.map-rail,.replay-control,.map-fit')]
+            .map(e=>e.getBoundingClientRect())
+            .filter(r=>r.width&&r.height&&!(r.right<=bar.left||r.left>=bar.right||r.bottom<=bar.top||r.top>=bar.bottom));
+          return hit.length;
+        }""")
+        self.assertEqual(overlap,0,'the confirm bar must not sit on the navigation or another control')
+        for name in ('この位置で確定','やめる'):
+            button=p.get_by_role('button',name=name)
+            box=button.bounding_box()
+            top=p.evaluate("(b)=>{const e=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return e&&e.textContent.trim();}",box)
+            self.assertEqual(top,name,f'{name} must be the element actually under the finger')
+        # Stopping restores the playback control.
+        p.get_by_role('button',name='やめる').click()
+        expect(p.locator('.replay-control')).to_be_visible()
+
+    def test_tapping_a_point_zooms_to_it_like_editing_does(self):
+        # Editing eased to the point; tapping one left the view where it was.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        result=p.evaluate("""()=>{
+          const e=__tm.viewerState.state().entries.find(x=>x.latitude!=null);
+          const before=__tm.everyone.mapZoom();
+          __tm.everyone.showEntry(e);
+          return {before,target:[e.longitude,e.latitude]};
+        }""")
+        p.wait_for_timeout(900)
+        after=p.evaluate("({zoom:__tm.everyone.mapZoom(),centre:__tm.everyone.mapCentre()})")
+        self.assertLess(result['before'],14,'the fixture must start zoomed out, or this proves nothing')
+        self.assertGreaterEqual(after['zoom'],14,'tapping must zoom in to the point')
+        self.assertAlmostEqual(after['centre'][0],result['target'][0],places=2)
+        self.assertAlmostEqual(after['centre'][1],result['target'][1],places=2)
+
 if __name__=='__main__':unittest.main(verbosity=2)
