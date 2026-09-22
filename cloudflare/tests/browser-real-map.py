@@ -12,6 +12,8 @@ original_cases = [
     'BrowserTests.test_compact_controls_at_mobile_widths',
     'BrowserTests.test_obscured_card_is_not_marked_read',
     'BrowserTests.test_self_shared_url_stays_public_only','BrowserTests.test_play_during_profile_bootstrap',
+    'BrowserTests.test_a_records_pin_is_grabbable_only_while_editing_that_record',
+    'BrowserTests.test_dragging_the_pin_updates_the_coordinate_fields',
 ]
 checks = [
     ('browser-smoke.py', original_cases, '1'),
