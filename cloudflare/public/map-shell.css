@@ -71,3 +71,4 @@ html:has(.map-app),body.map-app{height:100%;width:100%;overflow:hidden;overscrol
 .edit-bar{position:absolute;left:88px;bottom:66px;z-index:470;display:flex;align-items:center;gap:8px;flex-wrap:wrap;max-width:calc(100% - 110px);padding:8px 10px;border-radius:12px;background:#fffffff2;box-shadow:0 2px 12px #0004;font:600 13px/1.4 system-ui}
 .edit-bar-label{color:#16362d;font-variant-numeric:tabular-nums}
 @media(max-width:700px){.edit-bar{left:12px;right:12px;bottom:134px;max-width:none;justify-content:space-between}}
+.editing-location .replay-control{display:none}
