@@ -36,6 +36,7 @@
 - `cloudflare/public/record-display.js`: 本人/公開/位置のみの表示契約。内部の補完時刻と表示時刻を分離。
 - `cloudflare/public/map-record-card.js`: 通常ピン/再生が共有する1枚の地点カードと写真の中断処理。
 - `cloudflare/public/replay-model.js`: 固定再生データ、時間配分、記録到達、中断区間。`story.js`は別のログ付き再生。
+- `cloudflare/public/location-editor.js`: 編集中の1件だけ地図上でドラッグできるピン。掴めるのは常にひとつ。編集パネルが重なる分を避けて寄せ、地図が狭すぎる画面ではパネルを閉じる。
 - `cloudflare/public/shared.js`: DOM生成、通知など画面間の小さな共通処理。
 
 ## データと配備
