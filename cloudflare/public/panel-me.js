@@ -1,4 +1,5 @@
 import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
+import {makeLocationEditor} from '/location-editor.js';
 // ログイン中だけ読み込む: 自分の記録一覧・編集・公開設定、収支、旅と分類、記録フォーム、設定シート。私的データは /api/private/* からだけ取る
 export async function startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip}){
 const $=selector=>document.querySelector(selector);
@@ -66,45 +67,102 @@ async function activities(reset=true){
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
+const locationEditor=makeLocationEditor({map,notify,panel:shell.drawer,collapse:shell.hide});
+
+// 位置の編集。数値入力は残し、地図で調整したい人だけがピンを掴む。
+function locationFields(item,field){
+  const lat=el('input',{type:'number',step:'any',value:item.latitude??''});
+  const lng=el('input',{type:'number',step:'any',value:item.longitude??''});
+  const origin=item.latitude!=null?{lat:item.latitude,lng:item.longitude}:null;
+  const adjust=el('button',{type:'button',textContent:'地図で位置を調整'});
+  const revert=el('button',{type:'button',textContent:'位置を元に戻す',hidden:true});
+  const state=el('span',{className:'hint'});
+  function finish(){adjust.hidden=false;revert.hidden=true;state.textContent='';}
+  adjust.onclick=()=>{
+    adjust.hidden=true;revert.hidden=false;state.textContent='ピンをドラッグ中。保存で確定します';
+    locationEditor.start({lat,lng,origin,onStop:finish});
+  };
+  revert.onclick=()=>{
+    lat.value=origin?String(origin.lat):'';lng.value=origin?String(origin.lng):'';
+    locationEditor.stop();notify(origin?'位置を元に戻しました':'位置を空に戻しました');
+  };
+  return {lat,lng,nodes:[field('緯度',lat),field('経度',lng),adjust,revert,state],stop:locationEditor.stop};
+}
+
+function deleteButton(item){
+  const remove=el('button',{type:'button',textContent:'この記録を削除'});
+  remove.onclick=async()=>{
+    if(remove.dataset.armed!=='1'){
+      remove.dataset.armed='1';remove.textContent='もう一度押すと削除します（取り消せません）';
+      setTimeout(()=>{remove.dataset.armed='';remove.textContent='この記録を削除';},5000);return;
+    }
+    remove.disabled=true;
+    try{await apiDelete(`activities/${item.id}`);await refresh();notify('記録を削除しました');}
+    catch(error){notify(error.message);remove.disabled=false;}
+  };
+  return remove;
+}
+
+function publishOptions(item,field){
+  const options=el('form',{className:'form-grid'}),precision=el('select'),delay=el('select');
+  for(const [v,l] of [['exact','そのまま（地図に点）'],['city','場所名だけ'],['hidden','場所も位置も出さない']])precision.append(new Option(l,v));
+  precision.value=item.public_precision||'exact';
+  delay.append(new Option('予約はそのまま',''));
+  for(const [v,l] of [['0','今すぐ公開'],['24','1日後'],['72','3日後'],['168','1週間後'],['720','30日後']])delay.append(new Option(l,v));
+  const apply=el('button',{textContent:'公開の設定を変更'});
+  options.append(field('公開時の位置',precision),field('公開までの時間',delay),apply);
+  options.onsubmit=async event=>{
+    event.preventDefault();apply.disabled=true;
+    try{
+      const body={precision:precision.value};
+      if(delay.value!=='')body.publish_delay_hours=Number(delay.value);
+      await api(`public-entries/${item.public_id}/options`,body);
+      await activities();notify('公開の設定を変更しました');
+    }catch(error){notify(error.message);}finally{apply.disabled=false;}
+  };
+  return options;
+}
+
+function editForm(item,field,place){
+  const when=el('input',{type:'datetime-local',value:localNow(new Date(item.occurred_at))});
+  const cat=el('select');fillSelect(cat,categories.filter(c=>c.active&&c.kind==='activity'));cat.value=item.category_id;
+  const memo=el('textarea',{value:item.memo,rows:3,maxLength:4000});memo.className='wide';
+  const rating=el('select');rating.append(new Option('未評価',''));
+  for(let v=1;v<=5;v++)rating.append(new Option(String(v),String(v)));
+  rating.value=item.rating==null?'':String(item.rating);
+  const amount=el('input',{type:'number',min:0,step:1,value:item.spent_jpy??''});
+  const expense=el('select');fillSelect(expense,categories.filter(c=>c.active&&c.kind==='expense'));
+  const match=[...expense.options].find(o=>o.textContent===item.category_name);if(match)expense.value=match.value;
+  return {when,cat,memo,rating,amount,expense,
+    head:[field('日時',when),field('カテゴリ',cat),field('場所名',place),el('label',{className:'wide',textContent:'メモ'}),memo,field('評価',rating)],
+    tail:[field('金額（円・空欄で支払いなし）',amount),field('支出の分類',expense)]};
+}
+
 function editPanel(item){
   const detail=el('details'),title=el('summary',{textContent:'編集・削除'}),form=el('form',{className:'form-grid'});
   const field=(label,node)=>{const wrap=el('label',{textContent:label});wrap.append(node);return wrap;};
-  const when=el('input',{type:'datetime-local',value:localNow(new Date(item.occurred_at))});
-  const cat=el('select');fillSelect(cat,categories.filter(c=>c.active&&c.kind==='activity'));cat.value=item.category_id;
   const place=el('input',{value:item.observed_place_name||'',maxLength:200});
-  const memo=el('textarea',{value:item.memo,rows:3,maxLength:4000});memo.className='wide';
-  const rating=el('select');rating.append(new Option('未評価',''));for(let v=1;v<=5;v++)rating.append(new Option(String(v),String(v)));rating.value=item.rating==null?'':String(item.rating);
-  const lat=el('input',{type:'number',step:'any',value:item.latitude??''}),lng=el('input',{type:'number',step:'any',value:item.longitude??''});
-  const center=el('button',{type:'button',textContent:'地図の中心に移動'});center.onclick=()=>{const c=map.getCenter();lat.value=c.lat.toFixed(6);lng.value=c.lng.toFixed(6);notify('地図の中心の位置を入れました。保存で確定します');};
-  const amount=el('input',{type:'number',min:0,step:1,value:item.spent_jpy??''}),expense=el('select');fillSelect(expense,categories.filter(c=>c.active&&c.kind==='expense'));
-  const match=[...expense.options].find(o=>o.textContent===item.category_name);if(match)expense.value=match.value;
+  const f=editForm(item,field,place),where=locationFields(item,field);
   const save=el('button',{textContent:'保存する',className:'primary'});
   if(item.public_status==='published')form.append(el('p',{className:'hint wide',textContent:'公開中の記録です。場所名・メモ・位置の変更は公開ページにも反映されます。'}));
-  form.append(field('日時',when),field('カテゴリ',cat),field('場所名',place),el('label',{className:'wide',textContent:'メモ'}),memo,field('評価',rating),field('緯度',lat),field('経度',lng),center,field('金額（円・空欄で支払いなし）',amount),field('支出の分類',expense),save);
-  form.querySelector('label.wide').append(memo);
-  form.onsubmit=async event=>{event.preventDefault();save.disabled=true;
+  form.append(...f.head,...where.nodes,...f.tail,save);
+  form.querySelector('label.wide').append(f.memo);
+  // 編集を閉じたらピンも離す。開いたままの別の記録が掴めるようにはしない。
+  detail.addEventListener('toggle',()=>{if(!detail.open)where.stop();});
+  form.onsubmit=async event=>{
+    event.preventDefault();save.disabled=true;
     try{
-      const body={occurred_at:new Date(when.value).toISOString(),category_id:cat.value,observed_place_name:place.value||null,memo:memo.value,rating:rating.value===''?null:Number(rating.value)};
-      if((lat.value==='')!==(lng.value==='')){notify('緯度と経度は両方入れるか、両方空にしてください');save.disabled=false;return;}
-      if(lat.value!==''){body.latitude=Number(lat.value);body.longitude=Number(lng.value);}else if(item.latitude!=null){body.latitude=null;body.longitude=null;}
+      const body={occurred_at:new Date(f.when.value).toISOString(),category_id:f.cat.value,observed_place_name:place.value||null,memo:f.memo.value,rating:f.rating.value===''?null:Number(f.rating.value)};
+      if((where.lat.value==='')!==(where.lng.value===''))throw new Error('緯度と経度は両方入れるか、両方空にしてください');
+      if(where.lat.value!==''){body.latitude=Number(where.lat.value);body.longitude=Number(where.lng.value);}
+      else if(item.latitude!=null){body.latitude=null;body.longitude=null;}
       await api(`activities/${item.id}`,body);
-      if(String(item.spent_jpy??'')!==amount.value)await api(`activities/${item.id}/amount`,{category_id:expense.value,amount_minor:amount.value===''?null:Number(amount.value)});
-      await refresh();notify('記録を更新しました');
+      if(String(item.spent_jpy??'')!==f.amount.value)await api(`activities/${item.id}/amount`,{category_id:f.expense.value,amount_minor:f.amount.value===''?null:Number(f.amount.value)});
+      where.stop();await refresh();notify('記録を更新しました');
     }catch(error){notify(error.message);}finally{save.disabled=false;}
   };
-  const remove=el('button',{type:'button',textContent:'この記録を削除'});
-  remove.onclick=async()=>{if(remove.dataset.armed!=='1'){remove.dataset.armed='1';remove.textContent='もう一度押すと削除します（取り消せません）';setTimeout(()=>{remove.dataset.armed='';remove.textContent='この記録を削除';},5000);return;}
-    remove.disabled=true;try{await apiDelete(`activities/${item.id}`);await refresh();notify('記録を削除しました');}catch(error){notify(error.message);remove.disabled=false;}};
-  detail.append(title,form,remove);
-  if(item.public_status==='published'){
-    const options=el('form',{className:'form-grid'}),precision=el('select'),delay=el('select');
-    for(const [v,l] of [['exact','そのまま（地図に点）'],['city','場所名だけ'],['hidden','場所も位置も出さない']])precision.append(new Option(l,v));precision.value=item.public_precision||'exact';
-    delay.append(new Option('予約はそのまま',''));for(const [v,l] of [['0','今すぐ公開'],['24','1日後'],['72','3日後'],['168','1週間後'],['720','30日後']])delay.append(new Option(l,v));
-    const apply=el('button',{textContent:'公開の設定を変更'});
-    options.append(field('公開時の位置',precision),field('公開までの時間',delay),apply);
-    options.onsubmit=async event=>{event.preventDefault();apply.disabled=true;try{const body={precision:precision.value};if(delay.value!=='')body.publish_delay_hours=Number(delay.value);await api(`public-entries/${item.public_id}/options`,body);await activities();notify('公開の設定を変更しました');}catch(error){notify(error.message);}finally{apply.disabled=false;}};
-    detail.append(options);
-  }
+  detail.append(title,form,deleteButton(item));
+  if(item.public_status==='published')detail.append(publishOptions(item,field));
   return detail;
 }
 async function transactions(reset=true){

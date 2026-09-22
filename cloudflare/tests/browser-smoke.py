@@ -334,4 +334,75 @@ class BrowserTests(unittest.TestCase):
         p.wait_for_timeout(300)
         self.assertEqual(p.evaluate('window.__gpsEvents.length'),0,'a closed form must not keep measuring')
 
+    def open_own_edit(self,index=0):
+        p=self.page
+        p.evaluate("__tm.shell.open('profile')")
+        p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
+        p.evaluate("""(i)=>{
+          const entry=[...document.querySelectorAll('#activities > details')][i];
+          entry.open=true;entry.querySelector('details').open=true;
+        }""",index)
+        p.wait_for_function("!!document.querySelector('#activities [type=number][step=any]')")
+
+    def first_lat(self):
+        return self.page.evaluate("document.querySelector('#activities [type=number][step=any]').value")
+
+    def record(self,index=0):
+        return self.page.locator('#activities > details').nth(index)
+
+    def reopen_panel(self,index=0):
+        # Narrow screens collapse the panel so the pin is reachable; reopen it to save.
+        p=self.page
+        p.evaluate("__tm.shell.open('profile')")
+        p.evaluate("""(i)=>{
+          const entry=[...document.querySelectorAll('#activities > details')][i];
+          entry.open=true;entry.querySelector('details').open=true;
+        }""",index)
+        expect(self.record(index).get_by_role('button',name='保存する')).to_be_visible()
+
+    def test_a_records_pin_is_grabbable_only_while_editing_that_record(self):
+        # Moving a point used to mean typing coordinates or centring the map first.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.assertEqual(p.locator('.edit-pin').count(),0,'a record is not grabbable until asked')
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        # Editing a second record must move the grab, never leave two pins.
+        self.reopen_panel(1)
+        self.record(1).get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        self.reopen_panel(1)
+        # Closing that edit panel releases the pin.
+        p.evaluate("[...document.querySelectorAll('#activities > details')][1].querySelector('details').open=false")
+        expect(p.locator('.edit-pin')).to_have_count(0)
+
+    def test_reverting_a_moved_position_restores_the_stored_one(self):
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.assertEqual(self.first_lat(),'35')
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        self.reopen_panel()
+        p.fill('#activities [type=number][step=any]','10.5')
+        self.record().get_by_role('button',name='位置を元に戻す').click()
+        self.assertEqual(self.first_lat(),'35','revert must restore the stored position')
+        expect(p.locator('.edit-pin')).to_have_count(0)
+
+    @unittest.skipUnless(REAL_MAP,'dragging needs the real MapLibre marker')
+    def test_dragging_the_pin_updates_the_coordinate_fields(self):
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        before=self.first_lat()
+        p.wait_for_timeout(800)
+        box=p.locator('.edit-pin').bounding_box()
+        p.mouse.move(box['x']+box['width']/2,box['y']+box['height']/2)
+        p.mouse.down();p.mouse.move(box['x']+140,box['y']+110,steps=10);p.mouse.up()
+        p.wait_for_function("document.querySelector('#activities [type=number][step=any]').value!==%s"%json.dumps(before))
+        self.assertNotEqual(self.first_lat(),before,'dragging must update the coordinate field')
+
 if __name__=='__main__':unittest.main(verbosity=2)
