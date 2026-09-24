@@ -3,6 +3,7 @@ import {gl} from './owner-map.js';
 import {publicPoint} from './record-display.js';
 import {focusPoint} from './location-editor.js';
 import {mapRecordCard} from './map-record-card.js';
+import {otherRecordDetail} from './record-detail.js';
 import {withinPeriod} from './viewer-state.js';
 export {ago};
 const COLORS=['#a95013','#6934b5','#ba376f','#287495','#698326','#7b6318'];
@@ -32,9 +33,10 @@ export function makeEveryone(map,shell,{state,authenticated=false,onFilter=()=>{
     if(!map.getLayer('friends-line'))map.addLayer({id:'friends-line',type:'line',source:'friends-segments',paint:{'line-color':['get','color'],'line-width':2,'line-opacity':.7},layout:{'line-cap':'round','line-join':'round'}});
   }
   function detail(entry){
-    const article=el('article',{className:'record-detail'});
-    article.append(el('time',{textContent:entry.at?new Date(entry.at).toLocaleString('ja-JP'):entry.date}),el('h2',{textContent:entry.place_name||'旅のひとこま'}),el('p',{className:'memo',textContent:entry.memo||''}));
-    for(const photo of entry.photos||[]){if(/^\/api\/public\/photos\/[a-z0-9-]+$/.test(photo.url||''))article.append(el('img',{src:photo.url,alt:photo.caption||'旅の写真',loading:'lazy'}));}
+    const article=otherRecordDetail(entry,{
+      onAuthor:handle=>onOpenPerson(handle),
+      onPlay:handle=>{state.select(handle);onPlay(handle);},
+    });
     shell.view('record',article,'記録の詳細');
     if(!document.hidden)void Promise.resolve(onRead(publicStep(entry))).catch(e=>notify(e.message));
   }

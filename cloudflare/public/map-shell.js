@@ -12,16 +12,17 @@ export function mapShell(groups) {
   const drawer=el('aside',{className:'map-drawer',inert:true}),backdrop=el('div',{className:'pane-backdrop'}),grip=el('div',{className:'pane-grip'});// PC は右ペイン、スマホは下からのシート(見た目は CSS)。閉じている間は inert
   drawer.setAttribute('aria-label','操作パネル');
   const bar=el('div',{className:'drawer-heading'}),title=el('h1'),close=el('button',{textContent:'×',type:'button'});
-  close.setAttribute('aria-label','パネルを閉じる');bar.append(title,close);
+  const back=el('button',{className:'drawer-back',type:'button',textContent:'‹ 戻る',hidden:true});back.setAttribute('aria-label','前の画面へ戻る');
+  close.setAttribute('aria-label','パネルを閉じる');bar.append(back,title,close);
   const contents=el('div',{className:'drawer-body'});drawer.append(grip,bar,contents);
-  let active=null;const titles=new Map();// 後から足す表示(区間・旅の再生)の見出し
+  let active=null,suspended=null;const titles=new Map(),backs=new Map();// 後から足す表示(区間・旅の再生)の見出し
   const buttons=new Map(),panels=new Map();
-  function hide(){drawer.inert=true;stage.classList.remove('pane-open');buttons.get(active)?.setAttribute('aria-expanded','false');buttons.get(active)?.classList.remove('active');buttons.get(active)?.focus({preventScroll:true});active=null;drawer.dispatchEvent(new CustomEvent('viewchange',{detail:null}));}
+  function hide(){backs.clear();suspended=null;drawer.inert=true;stage.classList.remove('pane-open');buttons.get(active)?.setAttribute('aria-expanded','false');buttons.get(active)?.classList.remove('active');buttons.get(active)?.focus({preventScroll:true});active=null;drawer.dispatchEvent(new CustomEvent('viewchange',{detail:null}));}
   function open(id){
     if(!panels.has(id))return;
     for(const [key,node] of panels)node.hidden=key!==id;
     for(const [key,button] of buttons){button.classList.toggle('active',key===id);button.setAttribute('aria-expanded',String(key===id));}
-    active=id;title.textContent=titles.get(id)||groups.find(g=>g.id===id)?.title||groups.find(g=>g.id===id)?.label||'詳細';drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
+    active=id;back.hidden=!backs.has(id);title.textContent=titles.get(id)||groups.find(g=>g.id===id)?.title||groups.find(g=>g.id===id)?.label||'詳細';drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
   }
   for(const group of groups){
     const button=el('button',{type:'button'});button.append(el('span',{className:'rail-icon',textContent:group.icon}),el('span',{className:group.small?'rail-small':'',textContent:group.label}));
@@ -44,7 +45,15 @@ export function mapShell(groups) {
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!document.querySelector('dialog[open]'))hide();});
   const resize=()=>{document.body.style.height=Math.floor(window.visualViewport?.height||innerHeight)+'px';document.body.classList.toggle('keyboard-compact',innerWidth<=700&&!!document.activeElement?.closest('form')&&(window.visualViewport?.height||innerHeight)<500);};
   window.visualViewport?.addEventListener('resize',resize);document.addEventListener('focusin',resize);document.addEventListener('focusout',resize);resize();
-  function view(id,node,heading){if(!panels.has(id)){const box=el('div',{hidden:true});contents.append(box);panels.set(id,box);}if(node.parentNode!==panels.get(id))panels.get(id).replaceChildren(node);titles.set(id,heading);open(id);contents.scrollTop=0;}
+  // 地図を占領する操作の間だけパネルを退ける。active と戻り先は保ったまま。
+  function suspend(){if(!active)return;suspended=active;drawer.inert=true;stage.classList.remove('pane-open');}
+  function resume(){if(!suspended)return;const id=suspended;suspended=null;open(id);}
+  // 地図だけを見せる。パネルもレールも退くので、ピンをどこへでも動かせる。
+  function mapMode(on){stage.classList.toggle('map-only',!!on);}
+  function view(id,node,heading,options={}){
+    if(options.back)backs.set(id,options.back);else backs.delete(id);
+if(!panels.has(id)){const box=el('div',{hidden:true});contents.append(box);panels.set(id,box);}if(node.parentNode!==panels.get(id))panels.get(id).replaceChildren(node);titles.set(id,heading);open(id);contents.scrollTop=0;}
+  back.onclick=()=>{const go=backs.get(active);if(go){backs.delete(active);go();}else hide();};
   const detail=node=>view('route',node,'移動の記録'),story=(node,heading)=>view('story',node,heading);
-  return {open,hide,count,fit,drawer,view,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
+  return {open,hide,suspend,resume,mapMode,count,fit,drawer,view,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
 }

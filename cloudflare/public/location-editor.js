@@ -3,8 +3,6 @@ import {gl} from '/owner-map.js';
 
 // 編集中の1件だけ地図上でつまんで動かせるようにする。地図を見ているだけの地点は掴めない。
 // 数値入力は残す。細かい調整と、地図を操作できない場合のため。
-
-const MIN_GRAB_BAND=260;// これ以下しか地図が見えないとピンを掴めない
 export const FOCUS_ZOOM=14;
 
 // 地点へ寄せる。今より引いた表示にはしない。
@@ -12,17 +10,7 @@ export function focusPoint(map,lngLat,padding={}){
   map.easeTo({center:lngLat,zoom:Math.max(map.getZoom(),FOCUS_ZOOM),padding,duration:400});
 }
 
-// 編集パネルは地図に重なる。そのまま中心へ寄せるとピンがパネルの下に入る。
-// PCは横に開くので左を、スマホは全幅のシートが下から出るので下を空ける。
-function coveredBy(panel,map){
-  if(!panel||panel.inert)return null;
-  const p=panel.getBoundingClientRect(),c=map.getContainer().getBoundingClientRect();
-  if(!p.width||!p.height)return null;
-  if(p.width>=c.width*0.9)return {edge:'bottom',size:Math.max(0,c.bottom-p.top),free:Math.max(0,p.top-c.top)};
-  return {edge:'left',size:Math.max(0,p.right-c.left),free:Math.max(0,c.right-p.right)};
-}
-
-// 確定はドラッグしている手元に置く。パネルの中だと、パネルを閉じた画面で押せない。
+// 確定はドラッグしている手元に置く。パネルの中だと、パネルを退けた画面で押せない。
 function makeBar({onConfirm,onCancel}){
   const bar=el('div',{className:'edit-bar'});
   const label=el('span',{className:'edit-bar-label',textContent:'位置を調整中'});
@@ -33,13 +21,14 @@ function makeBar({onConfirm,onCancel}){
   return {bar,say:text=>{label.textContent=text;}};
 }
 
-export function makeLocationEditor({map,notify,panel,collapse,stage}){
+export function makeLocationEditor({map,notify,shell,stage}){
   let active=null;
   function stop(){
     if(!active)return;
     active.marker.remove();
     active.bar.remove();
     stage?.classList.remove('editing-location');
+    shell?.mapMode(false);shell?.resume();
     active.onStop?.();
     active=null;
   }
@@ -64,12 +53,9 @@ export function makeLocationEditor({map,notify,panel,collapse,stage}){
     stage?.classList.add('editing-location');
     (stage??document.body).append(bar);
     active={marker,bar,onStop};
-    const covered=coveredBy(panel,map);
-    // 残る地図が狭すぎる画面ではパネルを閉じる。ピンと確定バーは地図に残る。
-    const cramped=covered&&covered.free<MIN_GRAB_BAND;
-    if(cramped)collapse?.();
-    const padding=cramped||!covered?{}:{[covered.edge]:covered.size};
-    focusPoint(map,[from.lng,from.lat],padding);
+    // 地図を丸ごと使う。どの画面幅でもピンが隠れず、確定の置き場所にも困らない。
+    shell?.suspend();shell?.mapMode(true);
+    focusPoint(map,[from.lng,from.lat]);
     notify?.('ピンをドラッグして位置を決め、「この位置で確定」を押してください');
     return marker;
   }

@@ -1,5 +1,6 @@
 import {api,apiDelete,el,whoMarker,yen} from '/shared.js';
 import {makeLocationEditor,focusPoint} from '/location-editor.js';
+import {ownRecordDetail} from '/record-detail.js';
 // ログイン中だけ読み込む: 自分の記録一覧・編集・公開設定、収支、旅と分類、記録フォーム、設定シート。私的データは /api/private/* からだけ取る
 export async function startMe({shell,map,route,everyone,fitRecords,notify,me,playTrip}){
 const $=selector=>document.querySelector(selector);
@@ -50,6 +51,14 @@ async function activities(reset=true){
     const share=el('button',{textContent:'公開する内容を選ぶ'});share.onclick=()=>openShare(item).catch(error=>notify(error.message));actions.append(share);
     if(item.public_status==='published'){const hide=el('button',{textContent:'公開を解除'});hide.onclick=async()=>{try{await api(`public-entries/${item.public_id}/unpublish`,{});await activities();notify('公開を解除しました');}catch(error){notify(error.message);}};actions.append(hide);}
     card.append(actions);
+    const openDetail=()=>{
+      const panel=editPanel(item),detail=ownRecordDetail(item,{badge:badgeText,
+        onEdit:()=>{panel.open=true;panel.scrollIntoView({block:'start'});},extras:[panel]});
+      shell.view('record',detail,'記録の詳細',{back:()=>shell.open('profile')});
+    };
+    const openButton=el('button',{type:'button',className:'record-open',textContent:'記録を開く'});
+    openButton.onclick=openDetail;card.append(openButton);
+    detailOpeners.set(item.id,openDetail);
     card.append(editPanel(item));
     const detail=el('details'), title=el('summary',{textContent:'写真・領収書を添付'}), attachmentForm=el('form',{className:'form-grid'});
     const purpose=el('select',{name:'purpose'});purpose.append(new Option('旅の写真','photo'),new Option('領収書','receipt'));
@@ -57,7 +66,7 @@ async function activities(reset=true){
     const purposeLabel=el('label',{textContent:'用途'}),fileLabel=el('label',{textContent:'ファイル'});purposeLabel.append(purpose);fileLabel.append(file);attachmentForm.append(purposeLabel,fileLabel,el('button',{textContent:'非公開で添付'}));
     attachmentForm.onsubmit=async event=>{event.preventDefault();const button=attachmentForm.querySelector('button');button.disabled=true;try{const selected=file.files[0];if(!selected||selected.size>8*1024*1024)throw new Error('8MB以内のファイルを選択してください');const response=await fetch('/api/private/attachments?'+new URLSearchParams({activity_id:item.id,purpose:purpose.value}),{method:'POST',headers:{'Content-Type':selected.type},body:selected});const result=await response.json();if(!response.ok)throw new Error(result.error);file.value='';notify('非公開で添付しました');}catch(error){notify(error.message);}finally{button.disabled=false;}};
     detail.append(title,attachmentForm);card.append(detail);$('#activities').append(entry);
-    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{shell.open('profile');entry.open=true;entry.scrollIntoView({block:'start'});});entry.addEventListener('toggle',()=>{if(entry.open)focusPoint(map,[item.longitude,item.latitude]);});}
+    if(item.latitude!=null&&item.longitude!=null){located++;route.addPin(item,()=>{focusPoint(map,[item.longitude,item.latitude]);openDetail();});}
   }
   if(reset&&data.activities.length===0)$('#activities').append(el('p',{textContent:'まだ記録がありません。'}));
   activityOffset=data.next_offset;$('#more-activities').hidden=true;
@@ -67,7 +76,7 @@ async function activities(reset=true){
   if(reset)fitRecords();
 }
 // 記録の編集：日時・カテゴリ・場所名・メモ・評価・位置・金額。削除は2段階
-const locationEditor=makeLocationEditor({map,notify,panel:shell.drawer,collapse:shell.hide,stage:shell.stage});
+const locationEditor=makeLocationEditor({map,notify,shell,stage:shell.stage});
 
 // 位置の編集。数値入力は残し、地図で調整したい人だけがピンを掴む。
 function locationFields(item,field,submit){
@@ -262,7 +271,7 @@ $('#close-share').onclick=()=>$('#share-dialog').close();
 $('#month').value='';
 for(const input of document.querySelectorAll('[type=datetime-local]'))input.value=localNow();
 // 旅をまとめる: 記録一覧で「始まり」と「終わり」をタップすると、その間の記録がすべて選ばれる。名前を付けて旅にする
-const entryNodes=new Map(),tripBox=el('div',{id:'trip-cards'}),rangeStart=el('button',{type:'button',className:'range-start',textContent:'旅をまとめる'}),rangeBar=el('form',{className:'range-bar',hidden:true});
+const entryNodes=new Map(),detailOpeners=new Map(),tripBox=el('div',{id:'trip-cards'}),rangeStart=el('button',{type:'button',className:'range-start',textContent:'旅をまとめる'}),rangeBar=el('form',{className:'range-bar',hidden:true});
 const rangeInfo=el('p',{className:'range-info'}),rangeName=el('input',{maxLength:200,required:true,placeholder:'旅の名前'}),rangeSave=el('button',{className:'primary',textContent:'この範囲を旅にする'}),rangeCancel=el('button',{type:'button',textContent:'やめる'});
 rangeName.setAttribute('aria-label','旅の名前');rangeInfo.setAttribute('role','status');rangeBar.append(rangeInfo,rangeName,rangeSave,rangeCancel);$('#trip-panel').append(tripBox);$('#activities').before(rangeStart,rangeBar);
 let picking=false,pickA=null,pickB=null,nameTouched=false;
