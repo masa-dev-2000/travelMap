@@ -264,7 +264,7 @@ for(const input of document.querySelectorAll('[type=datetime-local]'))input.valu
 // 旅をまとめる: 記録一覧で「始まり」と「終わり」をタップすると、その間の記録がすべて選ばれる。名前を付けて旅にする
 const entryNodes=new Map(),tripBox=el('div',{id:'trip-cards'}),rangeStart=el('button',{type:'button',className:'range-start',textContent:'旅をまとめる'}),rangeBar=el('form',{className:'range-bar',hidden:true});
 const rangeInfo=el('p',{className:'range-info'}),rangeName=el('input',{maxLength:200,required:true,placeholder:'旅の名前'}),rangeSave=el('button',{className:'primary',textContent:'この範囲を旅にする'}),rangeCancel=el('button',{type:'button',textContent:'やめる'});
-rangeName.setAttribute('aria-label','旅の名前');rangeInfo.setAttribute('role','status');rangeBar.append(rangeInfo,rangeName,rangeSave,rangeCancel);$('#activities').before(tripBox,rangeStart,rangeBar);
+rangeName.setAttribute('aria-label','旅の名前');rangeInfo.setAttribute('role','status');rangeBar.append(rangeInfo,rangeName,rangeSave,rangeCancel);$('#trip-panel').append(tripBox);$('#activities').before(rangeStart,rangeBar);
 let picking=false,pickA=null,pickB=null,nameTouched=false;
 const jstDate=r=>new Date(r.occurred_at).toLocaleDateString('sv-SE',{timeZone:'Asia/Tokyo'}),shortDate=text=>{const [y,m,d]=text.split('-').map(Number);return `${y}/${m}/${d}`;};
 function rangeItems(){if(!pickA)return [];const a=Date.parse(pickA.occurred_at),b=Date.parse((pickB||pickA).occurred_at),lo=Math.min(a,b),hi=Math.max(a,b);return allRecords.filter(r=>{const t=Date.parse(r.occurred_at);return t>=lo&&t<=hi;}).sort((x,y)=>Date.parse(x.occurred_at)-Date.parse(y.occurred_at));}
@@ -297,7 +297,7 @@ function gaps(){
 }
 // 旅の一覧: 名前・期間・件数・支出。再生、名前の変更、解除(旅は残す／旅ごと消す。記録そのものは消えない)
 function renderTrips(){
-  tripBox.replaceChildren();if(!trips.length)return;tripBox.append(el('h2',{textContent:'旅'}));
+  tripBox.replaceChildren();if(!trips.length)return;
   for(const trip of trips){
     const card=el('details',{className:'trip-card'}),head=el('summary'),days=trip.first_at?`${shortDate(jstDate({occurred_at:trip.first_at}))}〜${shortDate(jstDate({occurred_at:trip.last_at}))}`:trip.starts_on?`${shortDate(trip.starts_on)}〜${trip.ends_on?shortDate(trip.ends_on):''}`:'';
     head.append(el('strong',{textContent:trip.name}),el('span',{textContent:[days,`${trip.entries??0}件`,trip.spent_jpy!=null?'支出 '+yen(trip.spent_jpy):''].filter(Boolean).join(' · ')}));card.append(head);

@@ -556,4 +556,67 @@ class BrowserTests(unittest.TestCase):
         self.assertNotIn('test',[e['author'] for e in feed['entries']],
                          'nor the viewer themselves')
 
+    def test_travel_mode_is_changed_in_one_place_only(self):
+        """公開範囲を左右する設定なので、変えられる場所が増えると事故になる。
+        記録の開始画面は今どちらかを示すだけにし、切替は設定に寄せた。"""
+        p=self.page
+        p.goto(self.origin+'/admin/start/')
+        expect(p.locator('#visible-label')).to_be_visible()
+        self.assertEqual(p.locator('#visible').count(),0,
+                         'the start screen must not offer a travel-mode switch')
+        wrote=[c for c in self.commands if c.get('path')=='/api/private/settings']
+        p.click('#visible-label')
+        p.wait_for_timeout(300)
+        self.assertEqual([c for c in self.commands if c.get('path')=='/api/private/settings'],wrote,
+                         'and tapping the label must not change anything')
+        # 設定側は従来どおり切り替えられる。
+        p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.evaluate("__tm.shell.button('settings').click()")
+        expect(p.locator('#settings-dialog #map-visible')).to_be_visible()
+
+    def test_trips_are_managed_in_one_panel(self):
+        """旅の入口は作る・期間でまとめる・一覧の3つに散っていた。ひとつの「旅」に集約する。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.evaluate("__tm.shell.open('profile')")
+        expect(p.locator('#trip-panel')).to_be_attached()
+        inside=p.evaluate("""()=>{
+          const panel=document.querySelector('#trip-panel');
+          const has=id=>!!panel.querySelector('#'+id);
+          return {form:has('trip-form'),assign:has('assign-form'),cards:has('trip-cards'),
+                  category:has('category-form'),
+                  summary:panel.querySelector('summary').textContent.trim()};
+        }""")
+        self.assertTrue(inside['form'],'旅を作る')
+        self.assertTrue(inside['assign'],'期間でまとめる')
+        self.assertTrue(inside['cards'],'旅の一覧')
+        self.assertFalse(inside['category'],'分類は旅ではないので同居させない')
+        self.assertEqual(inside['summary'],'旅')
+        # 分類は別の入れ物に残る。
+        self.assertTrue(p.evaluate("!!document.querySelector('#category-form')"),'分類の追加は残す')
+        self.assertFalse(p.evaluate("!!document.querySelector('#trip-panel #category-form')"))
+
+    def test_the_two_period_controls_say_what_they_filter(self):
+        """地図の期間と収支の月は別物で、連動しない。同じ「期間」に見えるのが混乱の元だった。
+        統合はできない(片方は相対期間、片方は暦月)ので、何に効くかを名乗らせる。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.assertEqual(p.get_attribute('.period-chip','aria-label'),'表示する期間',
+                         'the map chip filters what the map shows')
+        p.evaluate("__tm.shell.open('profile')")
+        labels=p.evaluate("""()=>({
+          month:document.querySelector('label:has(>#month)')?.textContent.replace(/\s+/g,''),
+          trip:document.querySelector('label:has(>#trip-filter)')?.textContent.split('すべて')[0].replace(/\s+/g,'')
+        })""")
+        self.assertIn('集計する月',labels['month'],'the money month must name its subject')
+        self.assertIn('記録と収支',labels['trip'],'the trip filter must name both subjects')
+        # 月を変えても地図の期間は動かない。連動していないことを固定しておく。
+        before=p.evaluate("__tm.viewerState.state().period.preset")
+        p.evaluate("document.querySelector('#money-panel').open=true")
+        p.fill('#month','2026-01')
+        p.wait_for_timeout(400)
+        self.assertEqual(p.evaluate("__tm.viewerState.state().period.preset"),before,
+                         'the money month must not silently move the map period')
+
 if __name__=='__main__':unittest.main(verbosity=2)
