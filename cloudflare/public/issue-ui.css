@@ -54,3 +54,23 @@
  .map-app .map-rail{justify-content:space-around}.map-app .map-rail button{width:84px}
  .tm-locationless-card{top:190px}
 }
+/* 記録1件の画面。縦に積む。中の .primary は sticky を解いて流れに戻す */
+.record-detail{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding-bottom:8px}
+.record-detail>*{margin:0;max-width:100%}
+.record-detail .primary{position:static;box-shadow:none;align-self:stretch;margin:6px 0 0}
+.record-detail .eyebrow{color:#356f68;font:700 12px/1.4 system-ui;letter-spacing:.04em}
+.record-detail h2{font-size:20px;line-height:1.4}
+.record-detail time{color:#647264;font-size:13px}
+.record-detail .detail-ago{color:#8a978c}
+.record-detail .memo{font-size:15px;line-height:1.75}
+.detail-author{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;padding:6px 10px 6px 6px;border-radius:14px;background:#eef2ec;align-self:stretch}
+.detail-author[disabled]{cursor:default}
+.detail-author .who-marker{--c:#356f68}
+.detail-author-name{font-weight:700}
+.detail-author-status{color:#647264;font-size:12px;margin-left:auto}
+.detail-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;align-self:stretch}
+.detail-fact{display:flex;flex-direction:column;gap:2px;padding:9px 11px;border:1px solid #dce4d9;border-radius:11px;background:#fff}
+.detail-fact .label{color:#647264;font-size:11px}
+.detail-fact .value{font-weight:700;font-size:14px}
+.detail-photos{display:grid;gap:8px;align-self:stretch}
+.record-open{align-self:flex-start}

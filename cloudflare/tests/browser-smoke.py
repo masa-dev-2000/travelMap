@@ -739,4 +739,38 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(p.evaluate("document.querySelector('.drawer-heading h1').textContent"),title,
                          'and comes back to the same place, not to a different screen')
 
+    def test_nothing_in_a_record_screen_sits_on_top_of_anything_else(self):
+        """新しい画面のCSSを書き忘れ、再生ボタンが日時に重なっていた。
+        中身が縦に積まれ、どれも他と重ならないことを見る。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        # 本番で崩れたのは、場所名もメモも無い「移動」の記録。中身が短いほど横に回り込む。
+        p.evaluate("""()=>{
+          const base=__tm.viewerState.state().entries.find(x=>x.author!=='test');
+          __tm.everyone.detail({...base,place_name:null,memo:'',category_name:'移動'});
+        }""")
+        expect(p.locator('.record-detail')).to_be_visible()
+        rows=p.evaluate("""()=>[...document.querySelectorAll('.record-detail > *')]
+          .map(n=>({name:(n.className||n.tagName).toString(),r:n.getBoundingClientRect()}))
+          .filter(x=>x.r.width&&x.r.height)
+          .map(x=>({name:x.name,top:x.r.top,bottom:x.r.bottom,left:x.r.left,right:x.r.right}))""")
+        self.assertGreater(len(rows),3,'the screen must actually have content')
+        # 積まれているなら、次の要素は前の要素より下から始まる。横に並ぶと崩れとして現れる。
+        for before,after in zip(rows,rows[1:]):
+            self.assertGreaterEqual(after['top'],before['bottom'],
+                                    f"{after['name']} must sit below {before['name']}, not beside it")
+        # 押せるものは実際に指が届く位置にある。
+        for name in ('この人の記録を再生',):
+            button=p.get_by_role('button',name=name)
+            button.scroll_into_view_if_needed()
+            box=button.bounding_box()
+            reachable=p.evaluate("""(b)=>{
+              const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);
+              return !!hit&&!!hit.closest('button')&&hit.closest('button').textContent.trim()===b.name;
+            }""",{**box,'name':name})
+            if not reachable:
+                cover=p.evaluate("(b)=>{const e=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return e?(e.className||e.tagName)+'|'+e.textContent.trim().slice(0,30):'none';}",box)
+                self.fail(f'{name} must be reachable, but {cover} is on top')
+
 if __name__=='__main__':unittest.main(verbosity=2)
