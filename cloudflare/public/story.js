@@ -4,7 +4,7 @@ import {mapRecordCard} from './map-record-card.js';
 import {validLocation} from './record-display.js';
 const SPEEDS=[.5,1,1.5,2,4];
 // One-person renderer. Queue, unread filters and authors belong to PlaybackController.
-export function makeStory(map,shell,{begin=()=>{},end=()=>{}}={}){
+export function makeStory(map,shell,{begin=()=>{},end=()=>{},keeps=new Set()}={}){
   const cards=mapRecordCard(map,shell),box=el('div',{className:'replay-control'});
   const play=el('button',{type:'button',className:'replay-play',textContent:'▶ 再生'});
   const position=el('div',{className:'replay-seek',hidden:true});
@@ -76,7 +76,8 @@ export function makeStory(map,shell,{begin=()=>{},end=()=>{}}={}){
   seek.oninput=()=>go(seek.value);restart.onclick=()=>go(reduced()?index+1:0);stop.onclick=()=>finish();
   document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(seenTimer);pause();}else if(active)paint();});
   window.addEventListener('pagehide',()=>finish());document.addEventListener('tm:auth-lost',()=>finish());
-  shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&active)finish();});
+  // 再生を続けてよい画面は呼び出し側が決める。読むための画面では捨てない。
+  shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&active&&!keeps.has(event.detail))finish();});
   map.on('basemapchanging',()=>{styleReady=false;clearTimeout(seenTimer);pause();cards.hide();});
   map.on('style.load',()=>{styleReady=true;draw();if(active)paint();});
   return {load,finish,pause,resume,go,seek:progress=>go(progress*(steps.length-1)),active:()=>active,

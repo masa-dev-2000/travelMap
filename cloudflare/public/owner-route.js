@@ -59,7 +59,8 @@ export function makeOwnerRoute(map,shell){
     content.append(el('p',{className:'hint',textContent:'区間 '+(index+1)+' / '+(rows.length-1)}),nav);
     for(const [r,label] of [[rows[index],'出発の記録'],[rows[index+1],'到着の記録']]){
       const section=el('section',{className:'route-stop'});section.append(el('p',{className:'eyebrow',textContent:label}),el('time',{textContent:new Date(r.occurred_at).toLocaleString('ja-JP')}),el('h2',{textContent:r.observed_place_name||r.category_name||'記録した場所'}),el('p',{className:'memo',textContent:r.memo}));
-      const button=el('button',{type:'button',textContent:'記録の詳細を開く'});button.onclick=()=>callbacks.get(r.id)?.();section.append(button);content.append(section);
+      // 戻り先は今の区間番号を焼き付ける。index は再描画や再生で null に戻るため、後から読むと壊れる。
+      const at=index,button=el('button',{type:'button',textContent:'記録の詳細を開く'});button.onclick=()=>callbacks.get(r.id)?.(()=>select(at,false));section.append(button);content.append(section);
     }
     content.append(el('p',{className:'hint',textContent:'記録地点を日時順につないでいます。'}));shell.detail(content);
     if(move)fit([point(rows[index]),point(rows[index+1])],true);
@@ -100,5 +101,5 @@ export function makeOwnerRoute(map,shell){
   return {setReplay:value=>{replaying=value;if(value){index=null;cards.hide();}else markers();draw();},track:()=>({id:'me',color:document.body.dataset.basemap==='fiord'?'#8ed5c3':'#21604f',points:combineOwnerPoints(rows,samples).map(p=>({...p,openDetail:p.kind==='record'?callbacks.get(p.id):undefined})),marker:rows.length?endpoints.at(-1):undefined}),
     // 旅をまとめる範囲の強調。表示中の期間とは無関係に、渡された記録をつないで見せる
     highlight:records=>{range=orderedRoute(records).map(point);index=null;draw();if(range.length)fit(range,true);},
-    setSamples:next=>{samples=next;draw();},setUser:next=>{user=next;if(!replaying)markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>[...(rows.length?rows.map(point):ghost?[point(ghost)]:[]),...samples.map(locationPoint).filter(Boolean).map(p=>[p.lng,p.lat])],count:()=>rows.length};
+    setSamples:next=>{samples=next;draw();},select,setUser:next=>{user=next;if(!replaying)markers();},clear,render,addPin:(item,open)=>callbacks.set(item.id,open),fitAll:()=>fit(rows.map(point)),fitPoints:coords=>fit(coords),points:()=>[...(rows.length?rows.map(point):ghost?[point(ghost)]:[]),...samples.map(locationPoint).filter(Boolean).map(p=>[p.lng,p.lat])],count:()=>rows.length};
 }

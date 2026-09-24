@@ -23,8 +23,15 @@ const account=el('section',{className:'sheet-section'});account.append($('#logou
 const edit=el('details',{className:'profile-edit'});edit.append(el('summary',{textContent:'プロフィールを編集'}),form);profile.append(edit);
 const profileBio=el('p',{id:'profile-bio'});edit.before(profileBio);
 const login=()=>el('a',{className:'quick-record',href:'/auth/google?next=%2F',textContent:'ログインして利用する'});
+// 画面ごとに行き先を分ける。プロフィールは人物情報だけを持ち、台帳は別の行き先にする。
+// ここで参照を取っておく: mapShell は body の残りを捨てるので、掴んでいない節点は消える。
+const timelineNodes=me?[$('#me-filters'),$('#activities').closest('section')]:[];
+const moneyNodes=me?[$('#money-panel')]:[];
+const tripNodes=me?[$('#trip-panel')]:[];
+if(me)settings.append($('#category-form').closest('details'));
+const destinations=el('nav',{className:'sheet-links'});
 const groups=[
-  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),$('#me-filters'),$('#money-panel'),$('#trip-panel'),$('#category-form').closest('details'),$('#activities').closest('section')]:[login()]},
+  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),destinations]:[login()]},
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:me?[el('a',{className:'quick-record',href:'/admin/start/',textContent:'記録をはじめる'}),$('#add-forms')]:[login()],action:()=>{if(me&&innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
   {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[],action:()=>{playback.suspend();settings.showModal();void viewerSettings.render();return true;}}
 ];
@@ -35,11 +42,29 @@ if(!me){
 }
 const shell=mapShell(groups),map=makeOwnerMap({settingsSlot:$('#map-style-settings')}),route=makeOwnerRoute(map,shell);
 shell.drawer.addEventListener('viewchange',()=>map.resize());
+if(me){
+  // 記録一覧の入口は地図の件数表示だけにする。プロフィールからは入れない。
+  shell.place('timeline',timelineNodes,'記録の一覧');
+  shell.count.disabled=false;
+  shell.count.onclick=()=>{shell.active()==='timeline'?shell.hide():shell.open('timeline');};
+  // おかねと旅はプロフィールから入る。戻り先は閉じても残る。
+  for(const [id,nodes,heading] of [['money',moneyNodes,'おかね'],['trips',tripNodes,'旅']]){
+    // 独立した画面になったので、折りたたみのまま置かない。開いて渡す。
+    for(const node of nodes)if(node.tagName==='DETAILS'){node.open=true;const s=node.querySelector(':scope>summary');if(s)s.hidden=true;}
+    shell.place(id,nodes,heading,{back:()=>shell.open('profile'),sticky:true});
+    const link=el('button',{type:'button',className:'sheet-link',textContent:heading+' ›'});
+    link.onclick=()=>shell.open(id);destinations.append(link);
+  }
+}
 let preset='7';try{const saved=localStorage.getItem('travelmap.period');if(['7','30','90','all'].includes(saved))preset=saved;}catch{}
 const viewerState=makeViewerState({self:me?.handle,period:preset});
 let mine=null,locations=null,noticeTimer,authEpoch=0;
 function notify(value){clearTimeout(noticeTimer);message.textContent=value;noticeTimer=setTimeout(()=>{message.textContent='';},10000);}
-const player=makeStory(map,shell,{begin:()=>{shell.hide();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
+// 再生を続ける画面は許可制。地図を見ながら読む画面だけが続き、台帳や設定では止まる。
+const KEEPS_PLAYING=new Set(['playback-options','record','route','story','timeline']);
+// 次の人物へ移る時も load() から begin() を通る。読んでいる画面まで閉じない。
+const READING=new Set(['timeline','record','route']);
+const player=makeStory(map,shell,{keeps:KEEPS_PLAYING,begin:()=>{if(!READING.has(shell.active()))shell.hide();route.setReplay(true);everyone.setReplay(true);},end:()=>{route.setReplay(false);everyone.setReplay(false);}});
 async function markRead(step){
   if(document.hidden||step.author===me?.handle||!step.publicEntryId||viewerState.state().muted.has(step.author))return;
   const epoch=authEpoch;
@@ -66,7 +91,7 @@ function choose(title,options){return new Promise(resolve=>{
 });}
 const playback=makePlaybackController({state:viewerState,player,refresh:options=>everyone.reload(options),loadGroup:group=>everyone.groupData(group),markRead,notify,choose});
 player.onPlay(()=>void playback.play());
-shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&event.detail!=='playback-options')playback.suspend();});
+shell.drawer.addEventListener('viewchange',event=>{if(event.detail&&!KEEPS_PLAYING.has(event.detail))playback.suspend();});
 const viewerSettings=makeViewerSettings({state:viewerState,reload:()=>everyone.reload(),cancelReload:everyone.cancelReload,notify,authenticated:!!me,slot:$('#mute-settings')});
 $('#close-settings').onclick=()=>settings.close();settings.addEventListener('click',event=>{if(event.target===settings)settings.close();});
 window.__tm={viewerState,everyone,route,shell,player,playback,stories};

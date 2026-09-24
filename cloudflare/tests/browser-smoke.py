@@ -186,7 +186,10 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(p.locator('.map-rail button[aria-controls]').evaluate_all("nodes=>nodes.map(n=>n.getAttribute('aria-label'))"),['プロフィール','記録する','設定'])
         expect(p.locator('.me-button,.friends-toggle,.route-overview,.maplibregl-ctrl-zoom-in')).to_have_count(0)
         expect(p.locator('.auto-location button')).to_have_count(1)
-        p.get_by_role('button',name='プロフィール',exact=True).click();expect(p.locator('#view-profile #me-name')).to_have_text('テスト');expect(p.locator('#view-profile #money-panel')).to_be_visible()
+        p.get_by_role('button',name='プロフィール',exact=True).click();expect(p.locator('#view-profile #me-name')).to_have_text('テスト')
+        # プロフィールは人物情報だけを持つ。台帳を同じ画面に積まない。
+        for stranger in ('#money-panel','#trip-panel','#activities','#me-filters','#category-form'):
+            expect(p.locator('#view-profile '+stranger)).to_have_count(0)
         p.get_by_role('button',name='パネルを閉じる').click();p.get_by_role('button',name='設定',exact=True).click()
         expect(p.locator('#settings-dialog')).to_be_visible();expect(p.locator('#map-style-settings .basemap-control')).to_be_visible();expect(p.locator('#settings-dialog #profile-form')).to_have_count(0)
         p.locator('#map-style-settings button',has_text='Bright').click();p.wait_for_function("document.body.dataset.basemap==='bright'")
@@ -222,7 +225,11 @@ class BrowserTests(unittest.TestCase):
         expect(p.locator('.auto-location')).to_have_count(0);p.locator('.period-chip').select_option('custom')
         p.locator('input[aria-label="期間の開始日"]').fill('2020-01-01');p.locator('input[aria-label="期間の終了日"]').fill('2026-09-20');p.get_by_role('button',name='この期間を表示').click()
         self.assertEqual(p.evaluate('__tm.viewerState.state().period.preset'),'custom');p.locator('.story-person[data-handle="friend"]').click();p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
-        p.locator('.tm-record-card').get_by_role('button',name='詳細を見る').click();expect(p.locator('.record-detail')).to_be_visible();self.assertFalse(p.evaluate('__tm.player.active()'))
+        # 記録を読むために開いた画面では再生を捨てない(許可リスト)。台帳や設定では止まる。
+        p.locator('.tm-record-card').get_by_role('button',name='詳細を見る').click();expect(p.locator('.record-detail')).to_be_visible();self.assertTrue(p.evaluate('__tm.player.active()'))
+        p.get_by_role('button',name='パネルを閉じる').click()
+        p.get_by_role('button',name='設定',exact=True).click()
+        self.assertFalse(p.evaluate('__tm.player.state().playing'),'settings must stop it')
     def test_failed_viewer_response_is_observable(self):
         self.viewer_failure=True;p=self.page;p.goto(self.origin+'/');expect(p.locator('.data-warning')).to_be_visible();expect(p.locator('.replay-play')).to_be_disabled();self.assertEqual(self.read_posts,[])
     def test_compact_controls_at_mobile_widths(self):
@@ -338,7 +345,7 @@ class BrowserTests(unittest.TestCase):
 
     def open_own_edit(self,index=0):
         p=self.page
-        p.evaluate("__tm.shell.open('profile')")
+        p.evaluate("__tm.shell.open('timeline')")
         p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
         p.evaluate("""(i)=>{
           const entry=[...document.querySelectorAll('#activities > details')][i];
@@ -580,7 +587,7 @@ class BrowserTests(unittest.TestCase):
         """旅の入口は作る・期間でまとめる・一覧の3つに散っていた。ひとつの「旅」に集約する。"""
         p=self.page;p.goto(self.origin+'/')
         expect(p.locator('.stories-strip')).to_be_visible()
-        p.evaluate("__tm.shell.open('profile')")
+        p.evaluate("__tm.shell.open('trips')")
         expect(p.locator('#trip-panel')).to_be_attached()
         inside=p.evaluate("""()=>{
           const panel=document.querySelector('#trip-panel');
@@ -605,7 +612,7 @@ class BrowserTests(unittest.TestCase):
         expect(p.locator('.stories-strip')).to_be_visible()
         self.assertEqual(p.get_attribute('.period-chip','aria-label'),'表示する期間',
                          'the map chip filters what the map shows')
-        p.evaluate("__tm.shell.open('profile')")
+        p.evaluate("__tm.shell.open('money')")
         labels=p.evaluate("""()=>({
           month:document.querySelector('label:has(>#month)')?.textContent.replace(/\s+/g,''),
           trip:document.querySelector('label:has(>#trip-filter)')?.textContent.split('すべて')[0].replace(/\s+/g,'')
@@ -693,7 +700,7 @@ class BrowserTests(unittest.TestCase):
         expect(p.locator('.stories-strip')).to_be_visible()
         p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
         # 一覧から
-        p.evaluate("__tm.shell.open('profile')")
+        p.evaluate("__tm.shell.open('timeline')")
         self.record().locator('summary').first.click()
         self.record().get_by_role('button',name='記録を開く').click()
         expect(p.locator('.record-detail.own')).to_be_visible()
@@ -772,5 +779,77 @@ class BrowserTests(unittest.TestCase):
             if not reachable:
                 cover=p.evaluate("(b)=>{const e=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return e?(e.className||e.tagName)+'|'+e.textContent.trim().slice(0,30):'none';}",box)
                 self.fail(f'{name} must be reachable, but {cover} is on top')
+
+    def test_the_count_display_is_the_way_into_the_record_list(self):
+        """記録一覧はプロフィールの中に埋まっていた。入口は地図の件数表示だけにする。"""
+        p=self.page;p.goto(self.origin+'/')
+        p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
+        count=p.locator('#map-count')
+        self.assertFalse(p.evaluate("document.querySelector('#map-count').disabled"),
+                         'the count must be pressable once records exist')
+        self.assertEqual(count.get_attribute('aria-controls'),'view-timeline',
+                         'and must say where it leads')
+        count.click()
+        self.assertEqual(p.evaluate("__tm.shell.active()"),'timeline')
+        expect(p.locator('#view-timeline #activities')).to_be_visible()
+        # スマホ幅では開いた時点で件数が覆われる。戻り道は「閉じる」側にある。
+        p.get_by_role('button',name='パネルを閉じる').click()
+        self.assertFalse(p.evaluate("!!document.querySelector('.map-stage.pane-open')"))
+        expect(count).to_be_visible()
+
+    def test_money_and_trips_are_their_own_destinations(self):
+        """収支と旅はプロフィールと同じ画面に積まれていた。別の行き先にし、戻り先を持たせる。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.get_by_role('button',name='プロフィール',exact=True).click()
+        for name,view,marker in [('おかね ›','money','#month'),('旅 ›','trips','#trip-form')]:
+            p.get_by_role('button',name=name).click()
+            self.assertEqual(p.evaluate("__tm.shell.active()"),view)
+            expect(p.locator(f'#view-{view} {marker}')).to_be_visible()
+            expect(p.locator('#view-profile')).to_be_hidden()
+            p.get_by_role('button',name='前の画面へ戻る').click()
+            expect(p.locator('#view-profile')).to_be_visible()
+            # 戻り先は閉じても残る。次に開いたときも迷子にならない。
+            p.get_by_role('button',name='パネルを閉じる').click()
+            p.get_by_role('button',name='プロフィール',exact=True).click()
+
+    def test_playback_survives_the_record_list_but_not_the_ledgers(self):
+        """画面を開くたび再生が捨てられていた。読むための画面だけ続け、台帳では止める。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.auto-location')).to_be_visible()
+        p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
+        p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
+        p.evaluate("__tm.shell.open('timeline')")
+        self.assertTrue(p.evaluate('__tm.player.active()'),
+                        'reading the record list must not throw the playback away')
+        p.evaluate("__tm.shell.open('money')")
+        self.assertFalse(p.evaluate('__tm.player.active()'),
+                         'the ledger is not something to read while the map moves')
+
+    def test_playback_never_closes_a_screen_the_user_is_reading(self):
+        """次の人物へ移るとき再生は画面を開き直す。読んでいる一覧まで閉じてしまっていた。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.auto-location')).to_be_visible()
+        p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
+        p.locator('.replay-play').click();p.wait_for_function('__tm.player.active()')
+        p.evaluate("window.__first=__tm.player.state().author")
+        p.evaluate("__tm.shell.open('timeline')")
+        # 次の人物の読み込みは load() を通り、その中で begin() が走る。
+        p.evaluate("()=>{const s=__tm.player.state();__tm.player.go(s.total-1);__tm.player.resume();}")
+        p.wait_for_function("__tm.player.state().author!==window.__first",timeout=8000)
+        self.assertTrue(p.evaluate("!!document.querySelector('.map-stage.pane-open')"),
+                        'the playback must not snatch the screen away while it is being read')
+        self.assertEqual(p.evaluate("__tm.shell.active()"),'timeline')
+
+    def test_a_record_opened_from_a_segment_returns_to_that_segment(self):
+        """区間から詳細へ入ると戻り道が消え、区間の概要へ二度と戻れなかった。"""
+        p=self.page;p.goto(self.origin+'/')
+        p.wait_for_function("__tm.route.count()>1")
+        p.evaluate("__tm.route.select(0)")
+        expect(p.locator('.route-detail')).to_be_visible()
+        p.get_by_role('button',name='記録の詳細を開く').first.click()
+        expect(p.locator('.record-detail.own')).to_be_visible()
+        p.get_by_role('button',name='前の画面へ戻る').click()
+        expect(p.locator('.route-detail')).to_be_visible()
 
 if __name__=='__main__':unittest.main(verbosity=2)

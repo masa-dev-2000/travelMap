@@ -74,3 +74,14 @@
 .detail-fact .value{font-weight:700;font-size:14px}
 .detail-photos{display:grid;gap:8px;align-self:stretch}
 .record-open{align-self:flex-start}
+
+/* 件数表示は記録一覧への入口。押せる時だけ押せると分かる見た目にする。 */
+#map-count{all:unset;font:400 11px/1.4 system-ui;color:#647264}
+#map-count:not(:disabled){cursor:pointer;color:#216453;font-weight:600}
+#map-count:not(:disabled):hover,#map-count:not(:disabled):focus-visible{text-decoration:underline}
+/* プロフィールから別の行き先へ。台帳を人物情報と同じ場所に積まない。 */
+.sheet-links{display:grid;gap:9px;margin:14px 0 0}
+.sheet-link{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;justify-content:space-between;min-height:48px;padding:13px 15px;border:1px solid #dce4d9;border-radius:13px;background:#fff;font:600 15px/1.4 system-ui;color:#1d3a2f}
+.sheet-link:hover,.sheet-link:focus-visible{border-color:#216453;background:#f3f7f1}
+/* 入口であることは飾りで示す。件数の文言は閲覧側と所有側の両方が書き換えるため、印を文字に混ぜない。 */
+#map-count:not(:disabled)::after{content:' \203a';font-weight:700}
