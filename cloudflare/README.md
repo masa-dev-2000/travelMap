@@ -24,6 +24,18 @@ D1由来の記録・プロフィールだけを一時停止として表示する
 
 `0016-reseed-public-order.sql` を本番へ一度だけ適用し、既存353件を `date` → `occurred_at` → `id` 順へその場で振り直した。表定義と `AUTOINCREMENT` は無変更で、後から公開された記録は日付に割り込まず大きい番号を取る。旧採番を指していた既読カーソルは0へ戻した（未読を黙って隠さないため）。適用後: 逆転140→0、seq 1〜353連番、補助表の残留なし、外部キー違反0、既存データとミュートは維持。Workerコードは無変更のため再配備していない。
 
+## 記録の詳細画面の表示崩れ修正（2026-09-24）
+
+PR #41 で記録1件の独立画面（`public/record-detail.js`）を追加したが、**その画面用のCSSを一切書いていなかった**。場所名もメモも無い「移動」の記録は中身が短く、`.primary.detail-play`（この人の記録を再生）が日時の横に回り込んで重なる。本番配備後の実機で発覚した。
+
+`public/issue-ui.css` に `.record-detail` を追加して縦積みにし、eyebrow・見出し・日時・著者行・写真・事実表・ボタンの体裁を与えた。`.primary` の sticky 指定は `.map-app .form-grid .primary` にしか効かないため、この画面では `position:static` を明示する。
+
+回帰検査は `tests/browser-smoke.py` の `test_nothing_in_a_record_screen_sits_on_top_of_anything_else`。崩れた実物と同条件（`place_name:null, memo:'', category_name:'移動'`）で詳細を開き、直下要素が順に下へ積まれること（横並びなら失敗）と、再生ボタンが `elementFromPoint` で実際に押せることを見る。`.record-detail{display:flex;…}` を外すと `primary detail-play must sit below TIME, not beside it` で失敗することを確認済み。3回連続実行で安定。
+
+- 配備元は main の merge commit `e425b65`（PR #42）。マージ直前 head `07e0c90` の CI run `35946538897` が core/browser とも成功。ローカルでも型検査・Nodeテスト83件・ビルド・0011..0017の移行統合・索引回帰・通常Chromium40件・実MapLibre4件を再確認した。
+- Worker Version `d1390732-7e08-4197-94f0-af0bee0f5ebb` を配備。復旧先は `cfb7c65b`（PR #41 の版、崩れを含む）。**DBの変更はなし。**
+- 配備後: 公開画面・`/issue-ui.css`・`/record-detail.js`・`/map-shell.js` が200、未認証 `/api/private/summary` は401。配備済みCSSに `.record-detail{display:flex;…}` が含まれることを実取得で確認。未認証の公開フィードに内部ID・アイコン列・既読・ミュートの漏れなし。
+
 ## 本番で確認した再生・ミュート（2026-09-21）
 
 テスト用閲覧者アカウント `traveler-f8ddc6`（Google連携あり、旅モード・公開ともオフ）で実施。書き込みはこのアカウントの行だけで、masaの既読カーソル・ミュートは0行のまま。
