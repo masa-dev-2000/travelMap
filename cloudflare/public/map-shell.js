@@ -8,7 +8,9 @@ export function mapShell(groups) {
   const stage=el('main',{className:'map-stage'}),rail=el('nav',{className:'map-rail'});
   rail.setAttribute('aria-label','地図のメニュー');
   const heading=el('div',{className:'map-heading'});heading.append(el('strong',{className:'map-title',textContent:'みんなの旅'}));
-  const count=el('span',{id:'map-count',textContent:'読み込み中…'});heading.append(count);
+  // 件数は記録一覧への入口。行き先を渡されるまでは、ただの表示のまま押せない。
+  const count=el('button',{id:'map-count',type:'button',textContent:'読み込み中…',disabled:true});
+  count.setAttribute('aria-controls','view-timeline');count.setAttribute('aria-expanded','false');heading.append(count);
   const drawer=el('aside',{className:'map-drawer',inert:true}),backdrop=el('div',{className:'pane-backdrop'}),grip=el('div',{className:'pane-grip'});// PC は右ペイン、スマホは下からのシート(見た目は CSS)。閉じている間は inert
   drawer.setAttribute('aria-label','操作パネル');
   const bar=el('div',{className:'drawer-heading'}),title=el('h1'),close=el('button',{textContent:'×',type:'button'});
@@ -17,12 +19,12 @@ export function mapShell(groups) {
   const contents=el('div',{className:'drawer-body'});drawer.append(grip,bar,contents);
   let active=null,suspended=null;const titles=new Map(),backs=new Map();// 後から足す表示(区間・旅の再生)の見出し
   const buttons=new Map(),panels=new Map();
-  function hide(){backs.clear();suspended=null;drawer.inert=true;stage.classList.remove('pane-open');buttons.get(active)?.setAttribute('aria-expanded','false');buttons.get(active)?.classList.remove('active');buttons.get(active)?.focus({preventScroll:true});active=null;drawer.dispatchEvent(new CustomEvent('viewchange',{detail:null}));}
+  function hide(){for(const [id,entry] of backs)if(!entry.sticky)backs.delete(id);suspended=null;drawer.inert=true;stage.classList.remove('pane-open');buttons.get(active)?.setAttribute('aria-expanded','false');buttons.get(active)?.classList.remove('active');(buttons.get(active)??(count.disabled?null:count))?.focus({preventScroll:true});active=null;count.setAttribute('aria-expanded','false');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:null}));}
   function open(id){
     if(!panels.has(id))return;
     for(const [key,node] of panels)node.hidden=key!==id;
     for(const [key,button] of buttons){button.classList.toggle('active',key===id);button.setAttribute('aria-expanded',String(key===id));}
-    active=id;back.hidden=!backs.has(id);title.textContent=titles.get(id)||groups.find(g=>g.id===id)?.title||groups.find(g=>g.id===id)?.label||'詳細';drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
+    active=id;count.setAttribute('aria-expanded',String(id==='timeline'));back.hidden=!backs.has(id);title.textContent=titles.get(id)||groups.find(g=>g.id===id)?.title||groups.find(g=>g.id===id)?.label||'詳細';drawer.inert=false;drawer.style.transform='';stage.classList.add('pane-open');drawer.dispatchEvent(new CustomEvent('viewchange',{detail:id}));close.focus({preventScroll:true});
   }
   for(const group of groups){
     const button=el('button',{type:'button'});button.append(el('span',{className:'rail-icon',textContent:group.icon}),el('span',{className:group.small?'rail-small':'',textContent:group.label}));
@@ -50,10 +52,17 @@ export function mapShell(groups) {
   function resume(){if(!suspended)return;const id=suspended;suspended=null;open(id);}
   // 地図だけを見せる。パネルもレールも退くので、ピンをどこへでも動かせる。
   function mapMode(on){stage.classList.toggle('map-only',!!on);}
-  function view(id,node,heading,options={}){
-    if(options.back)backs.set(id,options.back);else backs.delete(id);
-if(!panels.has(id)){const box=el('div',{hidden:true});contents.append(box);panels.set(id,box);}if(node.parentNode!==panels.get(id))panels.get(id).replaceChildren(node);titles.set(id,heading);open(id);contents.scrollTop=0;}
-  back.onclick=()=>{const go=backs.get(active);if(go){backs.delete(active);go();}else hide();};
+  // 行き先を用意するだけで開かない。常設の画面は起動時にここで登録する。
+  // sticky な戻り先は閉じても残る。一度きりの表示(記録の詳細)は使ったら消える。
+  function place(id,nodes,heading,options={}){
+    if(options.back)backs.set(id,{go:options.back,sticky:!!options.sticky});else backs.delete(id);
+    if(!panels.has(id)){const box=el('div',{id:'view-'+id,hidden:true});contents.append(box);panels.set(id,box);}
+    const list=[].concat(nodes).filter(Boolean),box=panels.get(id);
+    if(list.length&&list.some(node=>node.parentNode!==box))box.replaceChildren(...list);
+    titles.set(id,heading);
+  }
+  function view(id,node,heading,options={}){place(id,node,heading,options);open(id);contents.scrollTop=0;}
+  back.onclick=()=>{const entry=backs.get(active);if(entry){if(!entry.sticky)backs.delete(active);entry.go();}else hide();};
   const detail=node=>view('route',node,'移動の記録'),story=(node,heading)=>view('story',node,heading);
-  return {open,hide,suspend,resume,mapMode,count,fit,drawer,view,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
+  return {open,hide,suspend,resume,mapMode,count,fit,drawer,place,view,active:()=>active,detail,story,rail,heading,stage,button:id=>buttons.get(id)};
 }
