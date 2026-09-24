@@ -22,7 +22,7 @@
 
 ## ブラウザ側の責任
 
-- `cloudflare/public/map-shell.js` / `map-shell.css`: PC・SP共通の地図シェル、ナビゲーション、パネル配置。
+- `cloudflare/public/map-shell.js` / `map-shell.css`: PC・SP共通の地図シェル、ナビゲーション、パネル配置。`view(id,node,heading,{back})` の戻り先、`suspend`/`resume`（閉じずに退ける）、`mapMode`（地図だけにする）を持つ。見出しの「‹ 戻る」だけが一段戻り、閉じるは地図まで戻す。
 - `cloudflare/public/panel-everyone.js`: 公開記録、人物、期間フィルター、取得失敗時の縮退表示。`reload({maxAge})` は手元のフィードがその新しさなら再取得しない。タブ復帰など受動的な更新だけが使い、保存・ミュート・再生は必ず読み直す。
 - `cloudflare/public/panel-me.js`: ログイン中だけ読み込む私的記録、旅、分類、収支、公開設定、プロフィール。記録フォームを開いている間だけ位置を取得し、手入力された座標は上書きしない。
 - `cloudflare/public/owner-map.js` / `owner-route.js`: MapLibre上の本人用地点・経路・区間選択。
@@ -36,7 +36,8 @@
 - `cloudflare/public/record-display.js`: 本人/公開/位置のみの表示契約。内部の補完時刻と表示時刻を分離。
 - `cloudflare/public/map-record-card.js`: 通常ピン/再生が共有する1枚の地点カードと写真の中断処理。
 - `cloudflare/public/replay-model.js`: 固定再生データ、時間配分、記録到達、中断区間。`story.js`は別のログ付き再生。
-- `cloudflare/public/location-editor.js`: 編集中の1件だけ地図上でドラッグできるピン。掴めるのは常にひとつ。編集パネルが重なる分を避けて寄せ、地図が狭すぎる画面ではパネルを閉じる。
+- `cloudflare/public/record-detail.js`: 記録1件の画面。自分用と他人用で中身は変わるが入れ物は同じ。
+- `cloudflare/public/location-editor.js`: 編集中の1件だけ地図上でドラッグできるピン。掴めるのは常にひとつ。調整の間は `shell.mapMode` で地図を丸ごと使い、終われば元の画面へ戻す。
 - `cloudflare/public/shared.js`: DOM生成、通知など画面間の小さな共通処理。
 
 ## データと配備

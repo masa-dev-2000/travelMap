@@ -353,13 +353,7 @@ class BrowserTests(unittest.TestCase):
         return self.page.locator('#activities > details').nth(index)
 
     def reopen_panel(self,index=0):
-        # Narrow screens collapse the panel so the pin is reachable; reopen it to save.
-        p=self.page
-        p.evaluate("__tm.shell.open('profile')")
-        p.evaluate("""(i)=>{
-          const entry=[...document.querySelectorAll('#activities > details')][i];
-          entry.open=true;entry.querySelector('details').open=true;
-        }""",index)
+        # 位置の調整が終われば shell が自分で戻すので、待つだけでよい。
         expect(self.record(index).get_by_role('button',name='保存する')).to_be_visible()
 
     def test_a_records_pin_is_grabbable_only_while_editing_that_record(self):
@@ -370,12 +364,17 @@ class BrowserTests(unittest.TestCase):
         self.assertEqual(p.locator('.edit-pin').count(),0,'a record is not grabbable until asked')
         self.record().get_by_role('button',name='地図で位置を調整').click()
         expect(p.locator('.edit-pin')).to_have_count(1)
-        # Editing a second record must move the grab, never leave two pins.
-        self.reopen_panel(1)
+        # 調整中は地図だけになるので、別の記録に移るにはまず調整を終える。
+        p.get_by_role('button',name='やめる').click()
+        expect(p.locator('.edit-pin')).to_have_count(0)
+        expect(self.record().get_by_role('button',name='保存する')).to_be_visible()
+        # 2件目を掴んでも、ピンは常に1本。
+        self.open_own_edit(1)
         self.record(1).get_by_role('button',name='地図で位置を調整').click()
         expect(p.locator('.edit-pin')).to_have_count(1)
         expect(p.locator('.edit-bar')).to_have_count(1)
-        # Closing that edit panel releases the pin and its bar.
+        # 編集そのものを閉じれば、ピンもバーも離れる。
+        p.get_by_role('button',name='やめる').click()
         p.evaluate("[...document.querySelectorAll('#activities > details')][1].querySelector('details').open=false")
         expect(p.locator('.edit-pin')).to_have_count(0)
         expect(p.locator('.edit-bar')).to_have_count(0)
@@ -416,8 +415,10 @@ class BrowserTests(unittest.TestCase):
         self.open_own_edit()
         self.record().get_by_role('button',name='地図で位置を調整').click()
         expect(p.locator('.edit-bar')).to_be_visible()
+        self.assertEqual(p.evaluate("!!document.querySelector('.map-stage.map-only')"),True,
+                         'adjusting takes the whole map, so the bar must carry the confirm')
         self.assertEqual(p.evaluate("!!document.querySelector('.pane-open')"),False,
-                         'a narrow screen closes the panel, so the bar must carry the confirm')
+                         'and the panel steps aside while the pin is being moved')
         p.evaluate("document.querySelector('#activities [type=number][step=any]').value='36.5'")
         p.get_by_role('button',name='この位置で確定').click()
         p.wait_for_function('window.__edits===undefined||true')
@@ -618,5 +619,124 @@ class BrowserTests(unittest.TestCase):
         p.wait_for_timeout(400)
         self.assertEqual(p.evaluate("__tm.viewerState.state().period.preset"),before,
                          'the money month must not silently move the map period')
+
+    def test_adjusting_a_position_takes_the_whole_map_and_gives_it_back(self):
+        """パネルの下にピンが入る余地をなくす。終われば元の編集画面へ自分で戻る。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.assertFalse(p.evaluate("!!document.querySelector('.map-stage.map-only')"))
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        during=p.evaluate("""({
+          mapOnly:!!document.querySelector('.map-stage.map-only'),
+          paneOpen:!!document.querySelector('.map-stage.pane-open'),
+          rail:getComputedStyle(document.querySelector('.map-rail')).visibility
+        })""")
+        self.assertTrue(during['mapOnly'],'the map must take the screen')
+        self.assertFalse(during['paneOpen'],'the panel steps aside rather than staying over the pin')
+        self.assertEqual(during['rail'],'hidden','and the navigation with it')
+        # 手で開き直さなくても編集へ帰る。
+        p.get_by_role('button',name='やめる').click()
+        expect(self.record().get_by_role('button',name='保存する')).to_be_visible()
+        after=p.evaluate("""({
+          mapOnly:!!document.querySelector('.map-stage.map-only'),
+          paneOpen:!!document.querySelector('.map-stage.pane-open')
+        })""")
+        self.assertFalse(after['mapOnly'],'the map gives the screen back')
+        self.assertTrue(after['paneOpen'],'and the edit panel returns on its own')
+
+    def test_closing_a_view_goes_all_the_way_back_to_the_map(self):
+        """見出しの「‹ 戻る」だけが一段戻る。閉じるは地図まで戻す。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.evaluate("__tm.shell.open('profile')")
+        expect(p.locator('.drawer-back')).to_be_hidden()
+        p.evaluate("""()=>{
+          const node=document.createElement('p');node.textContent='ふかい画面';
+          __tm.shell.view('probe',node,'ふかい画面',{back:()=>__tm.shell.open('profile')});
+        }""")
+        expect(p.locator('.drawer-back')).to_be_visible()
+        p.get_by_role('button',name='前の画面へ戻る').click()
+        expect(p.locator('#view-profile')).to_be_visible()
+        expect(p.locator('.drawer-back')).to_be_hidden()
+        p.get_by_role('button',name='パネルを閉じる').click()
+        self.assertFalse(p.evaluate("!!document.querySelector('.map-stage.pane-open')"),
+                         'closing returns to the map, it does not step back one level')
+
+    def test_another_persons_record_shows_who_wrote_it_and_leads_to_them(self):
+        """他人の記録は日時・場所・メモだけだった。誰の記録かも、そこから人物へ行く道も無かった。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        p.evaluate("""()=>{
+          const e=__tm.viewerState.state().entries.find(x=>x.author!=='test');
+          window.__entry=e;__tm.everyone.detail(e);
+        }""")
+        expect(p.locator('.record-detail')).to_be_visible()
+        shown=p.evaluate("""()=>{
+          const d=document.querySelector('.record-detail');
+          return {author:d.querySelector('.detail-author-name')?.textContent,
+                  category:d.querySelector('.eyebrow')?.textContent,
+                  play:!!d.querySelector('.detail-play'),
+                  authorClickable:!d.querySelector('.detail-author').disabled};
+        }""")
+        self.assertEqual(shown['author'],p.evaluate("window.__entry.author_name"),'the author must be named')
+        self.assertEqual(shown['category'],p.evaluate("window.__entry.category_name"))
+        self.assertTrue(shown['authorClickable'],'and lead to that person')
+        self.assertTrue(shown['play'],'with a way to play their records')
+
+    def test_a_pin_and_the_list_reach_the_same_record_screen(self):
+        """自分の記録の編集はプロフィールの4階層目にあり、地図のピンから直接行けなかった。
+        どちらの入口からも、同じ1件だけの画面に着く。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("document.querySelectorAll('#activities > details').length>0")
+        # 一覧から
+        p.evaluate("__tm.shell.open('profile')")
+        self.record().locator('summary').first.click()
+        self.record().get_by_role('button',name='記録を開く').click()
+        expect(p.locator('.record-detail.own')).to_be_visible()
+        from_list=p.evaluate("document.querySelector('.record-detail.own h2').textContent")
+        self.assertTrue(p.evaluate("!!document.querySelector('.drawer-back')&&!document.querySelector('.drawer-back').hidden"),
+                        'and it can step back to where it came from')
+        # 地図のピンから。ピンは route に登録した開き方を呼ぶので、そこを叩く。
+        p.get_by_role('button',name='パネルを閉じる').click()
+        expect(p.locator('.record-detail.own')).to_be_hidden()
+        # track() が地図へ渡す点には、その記録を開く関数が入っている。ピンが押されたときに呼ばれるもの。
+        opened=p.evaluate("""()=>{
+          const point=__tm.route.track().points.find(pt=>pt.kind==='record'&&pt.openDetail);
+          if(!point)return false;
+          point.openDetail();return true;
+        }""")
+        self.assertTrue(opened,'a record pin must carry a way to open that record')
+        expect(p.locator('.record-detail.own')).to_be_visible()
+        self.assertEqual(p.evaluate("document.querySelector('.record-detail.own h2').textContent"),from_list,
+                         'the pin must land on the same screen as the list')
+        shown=p.evaluate("""()=>{
+          const d=document.querySelector('.record-detail.own');
+          return {badge:d.querySelector('.badge')?.textContent,
+                  edit:!!d.querySelector('.detail-edit'),
+                  facts:[...d.querySelectorAll('.detail-fact .label')].map(n=>n.textContent)};
+        }""")
+        self.assertTrue(shown['edit'],'the record screen carries its own edit')
+        self.assertIn('緯度・経度',shown['facts'],'and states where it is')
+        self.assertTrue(shown['badge'],'and whether it is published')
+
+    def test_adjusting_a_position_does_not_throw_away_the_open_record(self):
+        """位置の調整はパネルを閉じるのではなく退けるだけ。戻り先を覚えているので、
+        やめれば同じ記録の編集に帰る。閉じるボタンなら地図まで戻る。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        title=p.evaluate("document.querySelector('.drawer-heading h1').textContent")
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-pin')).to_have_count(1)
+        self.assertFalse(p.evaluate("!!document.querySelector('.map-stage.pane-open')"),
+                         'the panel steps aside')
+        p.get_by_role('button',name='やめる').click()
+        expect(p.locator('.map-stage.pane-open')).to_be_attached()
+        self.assertEqual(p.evaluate("document.querySelector('.drawer-heading h1').textContent"),title,
+                         'and comes back to the same place, not to a different screen')
 
 if __name__=='__main__':unittest.main(verbosity=2)
