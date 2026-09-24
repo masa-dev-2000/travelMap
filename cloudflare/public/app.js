@@ -24,7 +24,7 @@ const edit=el('details',{className:'profile-edit'});edit.append(el('summary',{te
 const profileBio=el('p',{id:'profile-bio'});edit.before(profileBio);
 const login=()=>el('a',{className:'quick-record',href:'/auth/google?next=%2F',textContent:'ログインして利用する'});
 const groups=[
-  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),$('#me-filters'),$('#money-panel'),$('#trip-form').closest('details'),$('#activities').closest('section')]:[login()]},
+  {id:'profile',label:'プロフィール',title:'プロフィール',icon:'◉',nodes:me?[profile,el('div',{id:'footprints'}),$('#me-filters'),$('#money-panel'),$('#trip-panel'),$('#category-form').closest('details'),$('#activities').closest('section')]:[login()]},
   {id:'add',label:'記録',title:'記録する',icon:'＋',nodes:me?[el('a',{className:'quick-record',href:'/admin/start/',textContent:'記録をはじめる'}),$('#add-forms')]:[login()],action:()=>{if(me&&innerWidth<=700){void navigateWithCapture('/admin/start/');return true;}return false;}},
   {id:'settings',label:'設定',title:'設定',icon:'⚙',nodes:[],action:()=>{playback.suspend();settings.showModal();void viewerSettings.render();return true;}}
 ];
