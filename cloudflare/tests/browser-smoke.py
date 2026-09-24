@@ -473,4 +473,87 @@ class BrowserTests(unittest.TestCase):
         self.assertAlmostEqual(after['centre'][0],result['target'][0],places=2)
         self.assertAlmostEqual(after['centre'][1],result['target'][1],places=2)
 
+    def test_confirming_keeps_the_view_on_the_point(self):
+        # Saving refreshes the feed, which refits the map to every record. After
+        # confirming a position the view jumped away from the point just placed.
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        self.open_own_edit()
+        self.record().get_by_role('button',name='地図で位置を調整').click()
+        expect(p.locator('.edit-bar')).to_be_visible()
+        p.wait_for_timeout(600)
+        focused=p.evaluate("({zoom:__tm.everyone.mapZoom(),centre:__tm.everyone.mapCentre()})")
+        self.assertGreaterEqual(focused['zoom'],14)
+        p.get_by_role('button',name='この位置で確定').click()
+        for _ in range(100):
+            if self.edits:break
+            p.wait_for_timeout(20)
+        self.assertTrue(self.edits,'confirming must save')
+        p.wait_for_timeout(1200)
+        after=p.evaluate("({zoom:__tm.everyone.mapZoom(),centre:__tm.everyone.mapCentre()})")
+        self.assertGreaterEqual(after['zoom'],14,'confirming must not zoom back out')
+        self.assertAlmostEqual(after['centre'][0],focused['centre'][0],places=2,msg='the view must stay on the point')
+        self.assertAlmostEqual(after['centre'][1],focused['centre'][1],places=2)
+
+    # --- UI改修前の安全網。構造ではなく「守りたい事実」を押さえる ---
+
+    def moves(self):
+        """偽の地図に「どこへ寄せろと指示されたか」を尋ねる。実物では見た目を再現できないため。"""
+        return self.page.evaluate("window.__tmMap.moves.map(m=>({kind:m.kind,center:m.center,zoom:m.zoom,padding:m.padding}))")
+
+    def test_tapping_a_point_asks_the_map_to_move_to_it(self):
+        if REAL_MAP: self.skipTest('偽の地図だけが指示を記録する')
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        target=p.evaluate("""()=>{
+          const e=__tm.viewerState.state().entries.find(x=>x.latitude!=null);
+          window.__tmMap.moves.length=0;
+          __tm.everyone.showEntry(e);
+          return [e.longitude,e.latitude];
+        }""")
+        p.wait_for_timeout(700)
+        asked=[m for m in self.moves() if m['center']]
+        self.assertTrue(asked,'tapping must ask the map to move')
+        last=asked[-1]
+        self.assertAlmostEqual(last['center'][0],target[0],places=4)
+        self.assertAlmostEqual(last['center'][1],target[1],places=4)
+        self.assertGreaterEqual(last['zoom'],14,'and to zoom in, not merely recentre')
+
+    def test_muting_in_the_browser_removes_an_author_everywhere(self):
+        """サーバーが送ってきた相手をブラウザ側でミュートしても、表示・名簿・再生から消える。
+        フィクスチャは既にミュート済みを送らないので、ここは画面側の除外だけを試す。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        def picture():
+            return p.evaluate("""async()=>{
+              const {playbackQueue}=await import('/viewer-state.js');
+              const s=__tm.viewerState.state();
+              return {authors:s.users.map(u=>u.handle),entries:s.entries.map(e=>e.author),
+                      queue:playbackQueue(s).map(g=>g.user.handle),
+                      strip:[...document.querySelectorAll('.story-person[data-handle]')].map(n=>n.dataset.handle)};
+            }""")
+        before=picture()
+        self.assertIn('friend',before['authors'],'the fixture must deliver this author')
+        self.assertIn('friend',before['strip'])
+        p.evaluate("__tm.viewerState.setMuted('friend',true)")
+        p.wait_for_timeout(300)
+        after=picture()
+        for where in ('authors','entries','queue','strip'):
+            self.assertNotIn('friend',after[where],f'a muted author must leave {where}')
+        self.assertNotIn('test',after['queue'],'and the viewer never plays their own records')
+
+    def test_the_server_never_sends_a_muted_author(self):
+        """画面側を直しても、送られてこない相手は出ない。サーバー側の除外を別に押さえる。"""
+        p=self.page;p.goto(self.origin+'/')
+        expect(p.locator('.stories-strip')).to_be_visible()
+        p.wait_for_function("__tm.everyone.count()>0")
+        feed=p.evaluate("fetch('/api/private/viewer-feed',{cache:'no-store'}).then(r=>r.json())")
+        self.assertIn('muted',feed['muted'],'the fixture must start with a muted author')
+        self.assertNotIn('muted',[e['author'] for e in feed['entries']],
+                         'the feed must not carry a muted author at all')
+        self.assertNotIn('test',[e['author'] for e in feed['entries']],
+                         'nor the viewer themselves')
+
 if __name__=='__main__':unittest.main(verbosity=2)
